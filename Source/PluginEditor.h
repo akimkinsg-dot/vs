@@ -1,287 +1,301 @@
 #pragma once
 #include "PluginProcessor.h"
 
-namespace ui
-{
-    inline const juce::Colour bg     { 0xff090a0f };
-    inline const juce::Colour panel  { 0xff13151e };
-    inline const juce::Colour line   { 0xff262a3a };
-    inline const juce::Colour text   { 0xffdfe2f2 };
-    inline const juce::Colour dim    { 0xff6d728c };
-    inline const juce::Colour cold   { 0xff5b7cff };
-    inline const juce::Colour warm   { 0xffffa95a };
-    inline const juce::Colour violet { 0xffa28bff };
-    inline const juce::Colour live   { 0xff4ade80 };
-
-    inline juce::Font font (float size, bool bold = true)
-    {
-        return juce::Font (juce::FontOptions (size, bold ? juce::Font::bold : juce::Font::plain));
+struct DragBox : juce::Component {
+  explicit DragBox(VibeSparkProcessor& p) : proc(p) { setMouseCursor(juce::MouseCursor::DraggingHandCursor); }
+  void paint(juce::Graphics& g) override {
+    g.setColour(juce::Colour(0xff40267a)); g.fillRoundedRectangle(getLocalBounds().toFloat().reduced(1), 10.0f);
+    g.setColour(juce::Colours::white); g.setFont(16.0f);
+    g.drawText("DRAG MIDI  >>  drop on DAW track", getLocalBounds(), juce::Justification::centred);
+  }
+  void mouseDrag(const juce::MouseEvent& e) override {
+    if (!dragging && e.getDistanceFromDragStart() > 4) {
+      dragging = true;
+      auto f = proc.writeMidiFile();
+      if (f.existsAsFile())
+        juce::DragAndDropContainer::performExternalDragDropOfFiles(juce::StringArray(f.getFullPathName()), false, this, [this] { dragging = false; });
+      else dragging = false;
     }
-}
-
-class VibeLookAndFeel : public juce::LookAndFeel_V4
-{
-public:
-    VibeLookAndFeel()
-    {
-        setColour (juce::ComboBox::backgroundColourId, ui::panel);
-        setColour (juce::ComboBox::outlineColourId, ui::line);
-        setColour (juce::ComboBox::textColourId, ui::text);
-        setColour (juce::ComboBox::arrowColourId, ui::dim);
-        setColour (juce::PopupMenu::backgroundColourId, ui::panel);
-        setColour (juce::PopupMenu::textColourId, ui::text);
-        setColour (juce::PopupMenu::highlightedBackgroundColourId, ui::line);
-    }
-
-    void drawToggleButton (juce::Graphics& g, juce::ToggleButton& b, bool over, bool) override
-    {
-        auto r = b.getLocalBounds().toFloat();
-        auto dot = r.removeFromLeft (22.0f).withSizeKeepingCentre (14.0f, 14.0f);
-        g.setColour (ui::line);
-        g.drawEllipse (dot, 1.5f);
-        if (b.getToggleState()) { g.setColour (ui::violet); g.fillEllipse (dot.reduced (3.0f)); }
-        g.setColour (over ? ui::text : ui::dim);
-        g.setFont (ui::font (11.0f));
-        g.drawText (b.getButtonText().toUpperCase(), r.withTrimmedLeft (6.0f).toNearestInt(),
-                    juce::Justification::centredLeft);
-    }
+  }
+  void mouseUp(const juce::MouseEvent&) override { dragging = false; }
+  VibeSparkProcessor& proc; bool dragging = false;
 };
 
-class XYVibePad : public juce::Component
-{
-public:
-    std::function<void(float, float)> onPadChanged;
-    std::function<void()> onPadDragEnded;
+struct MoodPad : juce::Component, private juce::Timer {
+  enum Mode { MapMode, AnimMode, InnerMode };
+  static constexpr float VX = 14.0f, VY = 14.0f, VW = 652.0f, VH = 412.0f, INFO_H = 58.0f;
 
-    void setPosition (float x, float y)
-    {
-        padX = juce::jlimit (0.0f, 1.0f, x);
-        padY = juce::jlimit (0.0f, 1.0f, y);
+  static int heightFor(int w) { return (int) std::lround((float) w * VH / VW + INFO_H); }
+
+  explicit MoodPad(VibeSparkProcessor& p) : proc(p) {
+    back.setButtonText("< Back to map");
+    back.onClick = [this] { leave(); };
+    addChildComponent(back);
+    startTimerHz(60);
+  }
+
+  void resized() override { back.setBounds(getWidth() - 116, getHeight() - (int) INFO_H + 4, 116, 24); }
+
+  juce::AffineTransform viewT() const {
+    auto r = getLocalBounds().toFloat(); r.removeFromBottom(INFO_H);
+    const float k = std::min(r.getWidth() / VW, r.getHeight() / VH);
+    return juce::AffineTransform::translation(-VX, -VY).scaled(k)
+        .translated(r.getX() + (r.getWidth() - VW * k) * 0.5f, r.getY() + (r.getHeight() - VH * k) * 0.5f);
+  }
+  juce::Point<float> toView(juce::Point<float> p) const { return p.transformedBy(viewT().inverted()); }
+
+  static float sm(float t) { t = juce::jlimit(0.0f, 1.0f, t); return t * t * (3.0f - 2.0f * t); }
+  static void setF(juce::Graphics& g, float h, bool bold) { g.setFont(h); if (bold) g.setFont(g.getCurrentFont().boldened()); }
+  static juce::String U(const char* s) { return juce::String::fromUTF8(s); }
+  static juce::String dot() { return U(" Â· "); }
+
+  void enter(int i) {
+    if (mode != MapMode) return;
+    active = i; mode = AnimMode; animFrom = 0.0f; animTo = 1.0f; animStart = juce::Time::getMillisecondCounterHiRes();
+    cur = tg = { 340.0f, 225.0f }; sent = cur;
+    proc.setMood(i, cur.x, cur.y, true);
+    computeWeights();
+    setMouseCursor(juce::MouseCursor::NormalCursor);
+  }
+  void leave() {
+    if (mode != InnerMode) return;
+    mode = AnimMode; animFrom = 1.0f; animTo = 0.0f; animStart = juce::Time::getMillisecondCounterHiRes();
+    back.setVisible(false);
+  }
+
+  void timerCallback() override {
+    if (mode == AnimMode) {
+      const float k = juce::jlimit(0.0f, 1.0f, (float) ((juce::Time::getMillisecondCounterHiRes() - animStart) / 700.0));
+      t = animFrom + (animTo - animFrom) * sm(k);
+      if (k >= 1.0f) {
+        t = animTo;
+        if (animTo > 0.5f) { mode = InnerMode; back.setVisible(true); }
+        else { mode = MapMode; active = -1; }
+      }
+      repaint();
+    } else if (mode == InnerMode) {
+      const float dx = tg.x - cur.x, dy = tg.y - cur.y;
+      if (std::abs(dx) + std::abs(dy) > 0.05f) {
+        cur.x += dx * 0.22f; cur.y += dy * 0.22f;
+        computeWeights();
+        if (std::hypot(cur.x - sent.x, cur.y - sent.y) > 1.5f) { sent = cur; proc.setMood(active, cur.x, cur.y, false); }
         repaint();
+      }
     }
+  }
 
-    void setLayerState (int l, int corner)
+  int cornerAt(juce::Point<float> v) const {
+    for (int i = 0; i < 4; ++i)
+      if (std::hypot(v.x - CORNERS[i].cx, v.y - CORNERS[i].cy) <= 54.0f) return i;
+    return -1;
+  }
+  void setTarget(juce::Point<float> v) { tg = { juce::jlimit(32.0f, 648.0f, v.x), juce::jlimit(32.0f, 408.0f, v.y) }; }
+  void mouseMove(const juce::MouseEvent& e) override {
+    setMouseCursor(mode == MapMode && cornerAt(toView(e.position)) >= 0 ? juce::MouseCursor::PointingHandCursor
+                                                                         : juce::MouseCursor::NormalCursor);
+  }
+  void mouseDown(const juce::MouseEvent& e) override {
+    const auto v = toView(e.position);
+    if (mode == MapMode) { const int i = cornerAt(v); if (i >= 0) enter(i); }
+    else if (mode == InnerMode) setTarget(v);
+  }
+  void mouseDrag(const juce::MouseEvent& e) override { if (mode == InnerMode) setTarget(toView(e.position)); }
+
+  void computeWeights() {
+    if (active < 0) return;
+    moodWeights(active, cur.x, cur.y, w);
+    nearest = 0; second = -1;
+    for (int j = 1; j < 8; ++j) if (w[j] > w[nearest]) nearest = j;
+    for (int j = 0; j < 8; ++j) if (j != nearest && (second < 0 || w[j] > w[second])) second = j;
+  }
+
+  void paint(juce::Graphics& g) override {
     {
-        layer = l;
-        activeCorner = corner;
-        repaint();
-    }
+      juce::Graphics::ScopedSaveState sss(g);
+      g.addTransform(viewT());
+      juce::Path frame; frame.addRoundedRectangle(20.0f, 20.0f, 640.0f, 400.0f, 12.0f);
+      g.setColour(juce::Colour(0xff1a1530)); g.fillPath(frame);
+      g.reduceClipRegion(frame);
 
-    float getXVal() const { return padX; }
-    float getYVal() const { return padY; }
-
-    void mouseDown (const juce::MouseEvent& e) override { updateFromMouse (e); }
-    void mouseDrag (const juce::MouseEvent& e) override { updateFromMouse (e); }
-    void mouseUp (const juce::MouseEvent&) override
-    {
-        if (onPadDragEnded) onPadDragEnded();
-    }
-
-    void paint (juce::Graphics& g) override
-    {
-        auto r = getLocalBounds().toFloat();
-        g.setColour (ui::panel);
-        g.fillRoundedRectangle (r, 12.0f);
-        g.setColour (ui::line);
-        g.drawRoundedRectangle (r.reduced (0.5f), 12.0f, 1.0f);
-
-        juce::Colour currentAccent = ui::cold.interpolatedWith (ui::warm, padX);
-        juce::ColourGradient grad (ui::cold.withAlpha (0.12f), 0.0f, r.getBottom(),
-                                   ui::warm.withAlpha (0.12f), r.getRight(), 0.0f, false);
-        g.setGradientFill (grad);
-        g.fillRoundedRectangle (r, 12.0f);
-
-        g.setColour (ui::line.withAlpha (0.4f));
-        g.drawHorizontalLine ((int) (r.getHeight() * 0.5f), 0.0f, r.getWidth());
-        g.drawVerticalLine ((int) (r.getWidth() * 0.5f), 0.0f, r.getHeight());
-
-        g.setFont (ui::font (11.0f));
-
-        if (layer == 0)
-        {
-            // Base layer labels (4 corners)
-            g.setColour (activeCorner < 0 || activeCorner == 0 ? ui::cold : ui::dim.withAlpha(0.2f));
-            g.drawText ("ETHEREAL VOID [TL]", r.reduced (14.0f), juce::Justification::topLeft);
-
-            g.setColour (activeCorner < 0 || activeCorner == 1 ? ui::text : ui::dim.withAlpha(0.2f));
-            g.drawText ("GOLDEN HOUR [TR]", r.reduced (14.0f), juce::Justification::topRight);
-
-            g.setColour (activeCorner < 0 || activeCorner == 2 ? ui::cold : ui::dim.withAlpha(0.2f));
-            g.drawText ("2AM CONFESSION [BL]", r.reduced (14.0f), juce::Justification::bottomLeft);
-
-            g.setColour (activeCorner < 0 || activeCorner == 3 ? ui::warm : ui::dim.withAlpha(0.2f));
-            g.drawText ("LATE NIGHT DRIVE [BR]", r.reduced (14.0f), juce::Justification::bottomRight);
+      if (mode == MapMode) drawMap(g, 1.0f);
+      else if (mode == InnerMode) drawInner(g, 1.0f);
+      else {
+        const Corner& c = CORNERS[active];
+        const float mapA = 1.0f - sm(t / 0.7f), inA = sm((t - 0.3f) / 0.7f);
+        if (mapA > 0.001f) {
+          juce::Graphics::ScopedSaveState s2(g);
+          const float s = 1.0f + 5.0f * t;
+          g.addTransform(juce::AffineTransform::scale(s, s, c.cx, c.cy));
+          drawMap(g, mapA);
         }
-        else
-        {
-            // Sub-layer zoomed view labels
-            static const char* subLabels[4][4] = {
-                { "NUMBNESS", "STASIS", "FLOAT", "VOID DEPTH" },
-                { "ACCEPTANCE", "CATHARSIS", "NOSTALGIA", "LIGHT" },
-                { "OBSESSION", "INSOMNIA", "TENSION", "ECHO" },
-                { "EUPHORIA", "PEAK DRIVE", "NEO-SOUL", "NEON" }
-            };
-
-            g.setColour (ui::warm);
-            g.drawText (juce::String ("ZOOMED SUB-LAYER: ") + juce::String (activeCorner >= 0 ? subLabels[activeCorner][0] : "SUB"), r.reduced (14.0f), juce::Justification::topLeft);
-            g.setColour (ui::dim);
-            g.drawText ("PULL OPPOSITE TO ZOOM OUT", r.reduced (14.0f), juce::Justification::bottomRight);
+        if (inA > 0.001f) {
+          juce::Graphics::ScopedSaveState s3(g);
+          const float s = 0.2f + 0.8f * t;
+          g.addTransform(juce::AffineTransform::scale(s, s, c.cx, c.cy));
+          drawInner(g, inA);
         }
-
-        const float px = padX * r.getWidth();
-        const float py = (1.0f - padY) * r.getHeight();
-        auto dotArea = juce::Rectangle<float> (26.0f, 26.0f).withCentre ({ px, py });
-
-        juce::ColourGradient halo (currentAccent.withAlpha (0.6f), px, py,
-                                   currentAccent.withAlpha (0.0f), px + 35.0f, py, true);
-        g.setGradientFill (halo);
-        g.fillEllipse (dotArea.expanded (16.0f));
-
-        g.setColour (juce::Colours::white);
-        g.fillEllipse (dotArea);
-        g.setColour (currentAccent);
-        g.drawEllipse (dotArea, 2.5f);
+      }
     }
+    {
+      juce::Graphics::ScopedSaveState sss(g);
+      g.addTransform(viewT());
+      g.setColour(juce::Colours::white.withAlpha(0.14f));
+      g.drawRoundedRectangle(20.0f, 20.0f, 640.0f, 400.0f, 12.0f, 1.0f);
+    }
+    paintInfo(g);
+  }
+
+  void drawMap(juce::Graphics& g, float alpha) {
+    juce::Graphics::ScopedSaveState sss(g);
+    if (alpha < 0.999f) g.beginTransparencyLayer(alpha);
+
+    setF(g, 14.5f, false); g.setColour(juce::Colours::white.withAlpha(0.5f));
+    g.drawText("warm", juce::Rectangle<float>(34.0f, 215.0f, 120.0f, 18.0f), juce::Justification::left);
+    g.drawText("cold", juce::Rectangle<float>(526.0f, 215.0f, 120.0f, 18.0f), juce::Justification::right);
+    g.drawText("tap a circle", juce::Rectangle<float>(240.0f, 215.0f, 200.0f, 18.0f), juce::Justification::centred);
+
+    for (int i = 0; i < 4; ++i) {
+      const Corner& c = CORNERS[i]; const juce::Colour col(c.col);
+      g.setColour(col.withAlpha(0.20f)); g.fillEllipse(c.cx - 54.0f, c.cy - 54.0f, 108.0f, 108.0f);
+      g.setColour(col.withAlpha(0.95f)); g.drawEllipse(c.cx - 54.0f, c.cy - 54.0f, 108.0f, 108.0f, 1.3f);
+      for (int j = 0; j < 8; ++j) {
+        const Shade& s = SHADES[i * 8 + j];
+        const float px = c.cx + (s.x - 340.0f) / 270.0f * 34.0f, py = c.cy + (s.y - 225.0f) / 135.0f * 30.0f;
+        g.setColour(col.withAlpha(0.8f)); g.fillEllipse(px - 2.6f, py - 2.6f, 5.2f, 5.2f);
+      }
+      const bool top = c.cy < 220.0f;
+      const float ty = top ? c.cy - 54.0f - 26.0f : c.cy + 54.0f + 22.0f;
+      setF(g, 16.5f, true); g.setColour(juce::Colours::white.withAlpha(0.95f));
+      g.drawText(juce::String(c.name) + dot() + c.tag, juce::Rectangle<float>(c.cx - 160.0f, ty - 14.0f, 320.0f, 20.0f), juce::Justification::centred);
+      setF(g, 14.0f, false); g.setColour(juce::Colours::white.withAlpha(0.6f));
+      g.drawText(c.desc, juce::Rectangle<float>(c.cx - 160.0f, ty + 3.0f, 320.0f, 18.0f), juce::Justification::centred);
+    }
+    if (alpha < 0.999f) g.endTransparencyLayer();
+  }
+
+  void drawInner(juce::Graphics& g, float alpha) {
+    if (active < 0) return;
+    juce::Graphics::ScopedSaveState sss(g);
+    if (alpha < 0.999f) g.beginTransparencyLayer(alpha);
+    const Corner& c = CORNERS[active]; const juce::Colour col(c.col);
+
+    g.setColour(juce::Colour(0xff1a1530)); g.fillRoundedRectangle(20.0f, 20.0f, 640.0f, 400.0f, 12.0f);
+    g.setColour(col.withAlpha(0.9f)); g.drawRoundedRectangle(20.0f, 20.0f, 640.0f, 400.0f, 12.0f, 1.3f);
+
+    setF(g, 17.0f, true); g.setColour(juce::Colours::white.withAlpha(0.95f));
+    g.drawText(juce::String(c.name) + dot() + c.tag, juce::Rectangle<float>(36.0f, 32.0f, 420.0f, 20.0f), juce::Justification::left);
+    setF(g, 14.0f, false); g.setColour(juce::Colours::white.withAlpha(0.6f));
+    g.drawText(c.desc, juce::Rectangle<float>(36.0f, 53.0f, 420.0f, 18.0f), juce::Justification::left);
+
+    const juce::String aL = U("â"), aR = U("â"), aU = U("â"), aD = U("â");
+    g.drawText(aL + " " + c.axL, juce::Rectangle<float>(34.0f, 398.0f, 260.0f, 18.0f), juce::Justification::left);
+    g.drawText(juce::String(c.axR) + " " + aR, juce::Rectangle<float>(386.0f, 398.0f, 260.0f, 18.0f), juce::Justification::right);
+    g.drawText(juce::String(c.axU) + " " + aU, juce::Rectangle<float>(386.0f, 31.0f, 260.0f, 18.0f), juce::Justification::right);
+    g.drawText(juce::String(c.axD) + " " + aD, juce::Rectangle<float>(386.0f, 380.0f, 260.0f, 18.0f), juce::Justification::right);
+
+    const Shade& ns = SHADES[active * 8 + nearest];
+    const float dashes[2] = {3.0f, 3.0f};
+    g.setColour(col.withAlpha(0.85f));
+    g.drawDashedLine(juce::Line<float>(cur.x, cur.y, ns.x, ns.y), dashes, 2, 1.2f);
+
+    for (int j = 0; j < 8; ++j) {
+      const Shade& s = SHADES[active * 8 + j];
+      const float dd = std::hypot(cur.x - s.x, cur.y - s.y);
+      const float r = 8.0f + 7.0f * sm((130.0f - dd) / 110.0f);
+      g.setColour(col.withAlpha(0.28f)); g.fillEllipse(s.x - r, s.y - r, 2 * r, 2 * r);
+      g.setColour(col); g.drawEllipse(s.x - r, s.y - r, 2 * r, 2 * r, 1.2f);
+      setF(g, 14.0f, j == nearest);
+      g.setColour(juce::Colours::white.withAlpha(j == nearest ? 1.0f : 0.7f));
+      g.drawText(s.name, juce::Rectangle<float>(s.x - 90.0f, s.y + 16.0f, 180.0f, 18.0f), juce::Justification::centred);
+    }
+    g.setColour(juce::Colours::white); g.fillEllipse(cur.x - 6.0f, cur.y - 6.0f, 12.0f, 12.0f);
+    g.setColour(juce::Colour(0xff1a1530)); g.drawEllipse(cur.x - 6.0f, cur.y - 6.0f, 12.0f, 12.0f, 2.0f);
+    if (alpha < 0.999f) g.endTransparencyLayer();
+  }
+
+  juce::StringArray chips() const {
+    juce::StringArray c;
+    if (proc.nost.load() >= 0.35f) c.add("borrowed chord");
+    const int r = proc.res.load();
+    c.add(r == RES_HOME ? "ends home" : (r == RES_HANG ? "ends hanging" : "ends twisted"));
+    if (proc.air.load() >= 0.3f) c.add("anticipation");
+    if (proc.tear.load() >= 0.4f) c.add("suspension");
+    if (proc.reg.load() >= 0.35f) c.add("high topline");
+    else if (proc.reg.load() <= -0.3f) c.add("low register");
+    if (proc.strum.load()) c.add("soft roll");
+    return c;
+  }
+
+  void paintInfo(juce::Graphics& g) {
+    auto b = getLocalBounds().toFloat();
+    auto info = b.removeFromBottom(INFO_H).reduced(2.0f, 0.0f);
+
+    juce::String name, axes;
+    if (active < 0) {
+      name = "Pick a corner";
+      axes = "Each corner is a core mood. Inside, it opens into shades.";
+    } else {
+      const Corner& c = CORNERS[active];
+      name = juce::String(c.name);
+      if (mode == InnerMode) {
+        name += " > " + juce::String(SHADES[active * 8 + nearest].name);
+        if (second >= 0 && w[second] >= 0.35f * w[nearest]) name += "  +  " + juce::String(SHADES[active * 8 + second].name);
+        const int px = (int) std::lround(juce::jlimit(0.0f, 1.0f, (cur.x - 70.0f) / 520.0f) * 100.0f);
+        const int py = (int) std::lround(juce::jlimit(0.0f, 1.0f, (375.0f - cur.y) / 270.0f) * 100.0f);
+        const juce::String lr = U("â");
+        axes = juce::String(c.axL) + " " + lr + " " + c.axR + ": " + juce::String(px) + "%" + dot()
+             + c.axD + " " + lr + " " + c.axU + ": " + juce::String(py) + "%";
+      } else axes = "Zooming in...";
+    }
+    const float textW = info.getWidth() - 120.0f;
+    setF(g, 15.5f, true); g.setColour(juce::Colours::white.withAlpha(0.95f));
+    g.drawText(name, juce::Rectangle<float>(info.getX(), info.getY() + 4.0f, textW, 19.0f), juce::Justification::left);
+    setF(g, 12.5f, false); g.setColour(juce::Colours::white.withAlpha(0.6f));
+    g.drawText(axes, juce::Rectangle<float>(info.getX(), info.getY() + 24.0f, info.getWidth(), 16.0f), juce::Justification::left);
+
+    if (active >= 0 && mode == InnerMode) {
+      setF(g, 11.0f, false);
+      float x = info.getX();
+      for (const auto& s : chips()) {
+        const float cw = (float) s.length() * 6.0f + 18.0f;
+        if (x + cw > info.getRight()) break;
+        const auto pill = juce::Rectangle<float>(x, info.getY() + 41.0f, cw, 17.0f);
+        g.setColour(juce::Colours::white.withAlpha(0.07f)); g.fillRoundedRectangle(pill, 8.5f);
+        g.setColour(juce::Colours::white.withAlpha(0.22f)); g.drawRoundedRectangle(pill, 8.5f, 0.8f);
+        g.setColour(juce::Colours::white.withAlpha(0.75f)); g.drawText(s, pill, juce::Justification::centred);
+        x += cw + 6.0f;
+      }
+    }
+  }
 
 private:
-    void updateFromMouse (const juce::MouseEvent& e)
-    {
-        auto r = getLocalBounds().toFloat();
-        padX = juce::jlimit (0.0f, 1.0f, e.x / r.getWidth());
-        padY = juce::jlimit (0.0f, 1.0f, 1.0f - (e.y / r.getHeight()));
-        repaint();
-        if (onPadChanged) onPadChanged (padX, padY);
-    }
-
-    float padX = 0.5f, padY = 0.5f;
-    int layer = 0;
-    int activeCorner = -1;
+  VibeSparkProcessor& proc;
+  juce::TextButton back;
+  Mode mode = MapMode;
+  int active = -1, nearest = 0, second = -1;
+  float t = 0.0f, animFrom = 0.0f, animTo = 0.0f, w[8] = {};
+  double animStart = 0.0;
+  juce::Point<float> cur{340.0f, 225.0f}, tg{340.0f, 225.0f}, sent{340.0f, 225.0f};
 };
 
-class ChordStrip : public juce::Component
-{
+class VibeSparkEditor : public juce::AudioProcessorEditor, private juce::Timer {
 public:
-    std::function<void()> onStartDragAll;
-    std::function<void(int)> onStartDragSingle;
-    std::function<void(int)> onClickPreviewChord;
+  explicit VibeSparkEditor(VibeSparkProcessor& p);
+  ~VibeSparkEditor() override;
 
-    void setChords (const juce::StringArray& names, const juce::String& t)
-    {
-        chords = names; title = t; repaint();
-    }
-    void setActive (int i) { if (i != active) { active = i; repaint(); } }
-    void setAccent (juce::Colour c) { if (c != accent) { accent = c; repaint(); } }
-
-    void mouseDown (const juce::MouseEvent& e) override
-    {
-        int clickedIdx = getChordIndexAt (e.getMouseDownX());
-        if (clickedIdx >= 0 && clickedIdx < chords.size())
-        {
-            if (onClickPreviewChord) onClickPreviewChord (clickedIdx);
-        }
-    }
-
-    void mouseDrag (const juce::MouseEvent& e) override
-    {
-        int clickedIdx = getChordIndexAt (e.getMouseDownX());
-        if (clickedIdx >= 0 && clickedIdx < chords.size())
-        {
-            if (onStartDragSingle) onStartDragSingle (clickedIdx);
-        }
-        else
-        {
-            if (onStartDragAll) onStartDragAll();
-        }
-    }
-
-    void paint (juce::Graphics& g) override
-    {
-        auto r = getLocalBounds().toFloat();
-        g.setColour (ui::dim);
-        g.setFont (ui::font (10.5f));
-        g.drawText (title.isEmpty() ? juce::String ("MOVE XY PAD TO VIBE") : title.toUpperCase() + "  (CLICK TO PREVIEW, DRAG TO EXPORT)",
-                    r.removeFromTop (18.0f).toNearestInt(), juce::Justification::centredLeft);
-        r.removeFromTop (4.0f);
-
-        const float gap = 10.0f;
-        const int numChords = std::max (1, chords.size());
-        const float w = (r.getWidth() - gap * (float)(numChords - 1)) / (float)numChords;
-        for (int i = 0; i < numChords; ++i)
-        {
-            auto tile = juce::Rectangle<float> (r.getX() + (float) i * (w + gap), r.getY(), w, r.getHeight());
-            const bool act = (i == active);
-            g.setColour (act ? accent.withAlpha (0.22f) : ui::panel);
-            g.fillRoundedRectangle (tile, 10.0f);
-            g.setColour (act ? accent : ui::line);
-            g.drawRoundedRectangle (tile.reduced (0.5f), 10.0f, act ? 2.0f : 1.0f);
-
-            g.setColour (act ? juce::Colours::white : ui::text);
-            g.setFont (ui::font (20.0f));
-            g.drawText (i < chords.size() ? chords[i] : juce::String ("-"),
-                        tile.toNearestInt(), juce::Justification::centred);
-            g.setColour (ui::dim);
-            g.setFont (ui::font (9.0f));
-            g.drawText ("BAR " + juce::String (i + 1), tile.reduced (8.0f, 6.0f).toNearestInt(),
-                        juce::Justification::topLeft);
-        }
-    }
+  void paint(juce::Graphics&) override;
+  void resized() override;
 
 private:
-    int getChordIndexAt (float x) const
-    {
-        auto r = getLocalBounds().toFloat().withTrimmedTop(22.0f);
-        const float gap = 10.0f;
-        const int numChords = std::max (1, chords.size());
-        const float w = (r.getWidth() - gap * (float)(numChords - 1)) / (float)numChords;
-        
-        for (int i = 0; i < numChords; ++i)
-        {
-            float tileX = r.getX() + (float) i * (w + gap);
-            if (x >= tileX && x <= tileX + w) return i;
-        }
-        return -1;
-    }
+  void initCtl(Ctl& c, const char* nm, float v, std::function<void(float)> cb);
+  static void placeCtl(Ctl& c, juce::Rectangle<int> a);
+  void syncFromProc();
+  void timerCallback() override;
 
-    juce::StringArray chords;
-    juce::String title;
-    int active = -1;
-    juce::Colour accent { ui::violet };
-};
-
-class VibeSparkAudioProcessorEditor : public juce::AudioProcessorEditor, private juce::Timer
-{
-public:
-    explicit VibeSparkAudioProcessorEditor (VibeSparkAudioProcessor&);
-    ~VibeSparkAudioProcessorEditor() override;
-
-    void paint (juce::Graphics&) override;
-    void resized() override;
-
-private:
-    void timerCallback() override;
-    void exportAndDragAllMidi();
-    void exportAndDragSingleMidi (int index);
-    void previewChordClicked (int index);
-    void handlePadRelease (float x, float y);
-
-    VibeSparkAudioProcessor& proc;
-    VibeLookAndFeel laf;
-
-    XYVibePad vibePad;
-    ChordStrip chordStrip;
-    juce::ComboBox keyBox;
-    juce::ToggleButton loopButton { "Loop" }, portButton { "Virtual MIDI port" };
-
-    using CA = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
-    using BA = juce::AudioProcessorValueTreeState::ButtonAttachment;
-    std::unique_ptr<CA> keyAtt;
-    std::unique_ptr<BA> loopAtt, portAtt;
-
-    juce::Rectangle<int> titleArea, bpmArea, padArea, footerArea;
-    double bpm = 120.0;
-    bool playing = false;
-    float beat = 0.0f;
-    juce::Colour accent { ui::violet };
-
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (VibeSparkAudioProcessorEditor)
+  VibeSparkProcessor& proc;
+  juce::ComboBox keyBox, voiBox, octBox, resBox;
+  struct Ctl { juce::Label name; juce::Slider s; };
+  Ctl cNost, cAir, cTear, cHuman;
+  juce::TextButton genBtn, contBtn, preBtn, nobassBtn, strumBtn;
+  juce::Label label; MoodPad pad; DragBox drag;
 };

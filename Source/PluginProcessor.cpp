@@ -1,329 +1,155 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-juce::AudioProcessorValueTreeState::ParameterLayout VibeSparkAudioProcessor::createLayout()
-{
-    using namespace juce;
-    AudioProcessorValueTreeState::ParameterLayout l;
-
-    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "vibeX", 1 }, "Vibe X",
-           NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
-    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "vibeY", 1 }, "Vibe Y",
-           NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
-
-    StringArray keys { "Random", "Last MIDI Note", "C", "C#/Db", "D", "D#/Eb", "E", "F",
-                       "F#/Gb", "G", "G#/Ab", "A", "A#/Bb", "B" };
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "key", 1 }, "Key", keys, 0));
-    l.add (std::make_unique<AudioParameterBool> (ParameterID { "loop", 1 }, "Loop", true));
-    l.add (std::make_unique<AudioParameterBool> (ParameterID { "port", 1 }, "Virtual MIDI Port", true));
-    return l;
+VibeSparkProcessor::VibeSparkProcessor() : AudioProcessor(BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(), true)) {
+  synth.addSound(new PadSound());
+  for (int i = 0; i < 16; ++i) synth.addVoice(new PadVoice());
+  generate();
 }
 
-VibeSparkAudioProcessor::VibeSparkAudioProcessor()
-    : AudioProcessor (BusesProperties()
-                     #if ! JucePlugin_IsMidiEffect
-                      .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
-                     #endif
-                      ),
-      apvts (*this, nullptr, "VIBESPARK_STATE", createLayout())
-{
-    vibeXParam = apvts.getRawParameterValue ("vibeX");
-    vibeYParam = apvts.getRawParameterValue ("vibeY");
-    keyParam   = apvts.getRawParameterValue ("key");
-    loopParam  = apvts.getRawParameterValue ("loop");
-    portParam  = apvts.getRawParameterValue ("port");
-
-    queue.reserve (2048);
-    portSender = std::make_unique<MidiPortSender>();
+void VibeSparkProcessor::prepareToPlay(double sr, int) {
+  sampleRate = sr; synth.setCurrentPlaybackSampleRate(sr); active.reserve(64); pending.reserve(64);
 }
 
-VibeSparkAudioProcessor::~VibeSparkAudioProcessor() = default;
-
-bool VibeSparkAudioProcessor::isMidiEffect() const
-{
-   #if JucePlugin_IsMidiEffect
-    return true;
-   #else
-    return false;
-   #endif
-}
-
-bool VibeSparkAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
-{
-   #if JucePlugin_IsMidiEffect
-    juce::ignoreUnused (layouts);
-    return true;
-   #else
-    return layouts.getMainOutputChannelSet() == juce::AudioChannelSet::stereo()
-        || layouts.getMainOutputChannelSet() == juce::AudioChannelSet::mono();
-   #endif
-}
-
-void VibeSparkAudioProcessor::prepareToPlay (double sampleRate, int)
-{
-    currentSampleRate = sampleRate;
-    samplePos = 0;
-    queue.clear();
-    sounding.fill (false);
-    portNotes.fill (false);
-    cycleActive = haveCycle = startedInTransport = wasPlaying = false;
-    lastTransportPpq = -1.0;
-}
-
-void VibeSparkAudioProcessor::requestSpark()
-{
-    const int keySel = (int) keyParam->load();
-    int keyPc = 0;
-    if (keySel == 0)       keyPc = engine.randomKey();
-    else if (keySel == 1)  { const int p = lastInputPc.load(); keyPc = p >= 0 ? p : engine.randomKey(); }
-    else                   keyPc = keySel - 2;
-
-    vs::Progression p;
-    juce::StringArray names;
-    juce::String name;
-    engine.generate (vibeXParam->load(), vibeYParam->load(), currentLayer.load(), activeCorner.load(), keyPc,
-                     hostBpm.load(), hostBeatsPerBar.load(), p, names, name);
-
-    {
-        const juce::SpinLock::ScopedLockType lock (handoffLock);
-        handoff = p;
-        handoffReady = true;
+void VibeSparkProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) {
+  juce::ScopedNoDenormals nd;
+  buffer.clear(); midi.clear();
+  const int n = buffer.getNumSamples();
+  bool hostPlaying = false, havePpq = false; double ppq = 0, bpm = 120.0;
+  if (auto* ph = getPlayHead())
+    if (auto pos = ph->getPosition()) {
+      hostPlaying = pos->getIsPlaying();
+      if (auto p = pos->getPpqPosition()) { ppq = *p; havePpq = true; }
+      if (auto b = pos->getBpm()) bpm = *b;
     }
-    chordNames = names;
-    progressionName = name;
+  if (bpm < 20.0) bpm = 120.0;
+  bool run = false;
+  if (hostPlaying && havePpq) run = true;
+  else if (preview.load()) { ppq = internalPpq; bpm = getCurrentBpm(); internalPpq += (double) n / sampleRate * (bpm / 60.0); run = true; }
+
+  if (version.load() != snapVersion) {
+    juce::SpinLock::ScopedTryLockType tl(lock);
+    if (tl.isLocked()) { snap = state; snapVersion = version.load(); }
+  }
+
+  juce::MidiBuffer ev;
+  if (run) {
+    const double pps = bpm / 60.0 / sampleRate;
+    const double p0 = ppq, p1 = p0 + (double) n * pps;
+    auto off = [&](double t) { return juce::jlimit(0, n - 1, (int) std::floor((t - p0) / pps)); };
+    auto release = [&](double upTo) {
+      for (size_t i = 0; i < active.size();) {
+        if (active[i].end <= upTo) {
+          ev.addEvent(juce::MidiMessage::noteOff(1, active[i].note), off(active[i].end));
+          active.erase(active.begin() + (long) i);
+        } else ++i;
+      }
+    };
+    auto cutAll = [&](int at) {
+      for (auto& a : active) ev.addEvent(juce::MidiMessage::noteOff(1, a.note), at);
+      active.clear(); pending.clear();
+    };
+    auto play = [&](const Hit& h, double t, int at) {
+      if (h.chord < 0 || h.chord > 3) return;
+      if (!h.topOnly) cutAll(at);
+      const auto& c = snap.voiced[h.chord];
+      const int sz = (int) c.size();
+      if (sz < 2) return;
+      const int octOffset = octaveShift.load() * 12;
+      const bool skipB = noBass.load();
+      const bool doStrum = strum.load();
+      const float hm = human.load();
+      const double msToPpq = bpm / 60000.0;
+
+      for (int i = 0; i < sz; ++i) {
+        const bool isTop = (i == sz - 1);
+        if (skipB && i == 0) continue;
+        if (h.topOnly && !isTop) continue;
+        int note = c[(size_t) i];
+        double endT = t + h.len;
+        if (isTop && h.sus >= 0) { note = h.sus; endT = t + h.susLen; }
+        else if (i > 0 && !isTop && !h.topOnly) endT -= (double) hm * 0.1 * audioRng.nextFloat();
+        note += octOffset;
+        if (note < 0 || note > 127) continue;
+
+        double ms = h.topOnly ? (double) hm * 4.0 * audioRng.nextFloat()
+                              : (doStrum ? 22.0 * i : 0.0) + (double) hm * (6.0 * i + 8.0 * audioRng.nextFloat());
+        const int vel = calcVel(i, isTop, note, h.chord, hm, audioRng.nextFloat(), h.topOnly);
+
+        active.push_back(Act{note, endT});
+        if (ms < 0.5) ev.addEvent(juce::MidiMessage::noteOn(1, note, (juce::uint8) vel), at);
+        else pending.push_back(Pend{t + ms * msToPpq, note, (juce::uint8) vel});
+      }
+    };
+
+    const bool jump = !wasRunning || std::abs(p0 - expectedPpq) > 0.25;
+    const double base = std::floor(p0 / 16.0) * 16.0;
+    if (jump) {
+      cutAll(0);
+      for (const auto& h : snap.hits) {
+        const double t = base + h.start;
+        if (t < p0 - 1e-9 && t + h.len > p0 + 1e-9) play(h, t, 0);
+      }
+    }
+    const double w0 = jump ? p0 : expectedPpq;
+    for (int cyc = 0; cyc < 2; ++cyc)
+      for (const auto& h : snap.hits) {
+        const double t = base + cyc * 16.0 + h.start;
+        if (t >= w0 && t < p1) { release(t); play(h, t, off(t)); }
+      }
+    for (size_t i = 0; i < pending.size();) {
+      if (pending[i].t < p1) {
+        ev.addEvent(juce::MidiMessage::noteOn(1, pending[i].note, pending[i].vel), off(pending[i].t));
+        pending.erase(pending.begin() + (long) i);
+      } else ++i;
+    }
+    release(p1);
+    expectedPpq = p1; wasRunning = true;
+  } else if (wasRunning) {
+    for (auto& a : active) ev.addEvent(juce::MidiMessage::noteOff(1, a.note), 0);
+    active.clear(); pending.clear(); wasRunning = false;
+  }
+  synth.renderNextBlock(buffer, ev, 0, n);
+  midi.swapWith(ev);
 }
 
-void VibeSparkAudioProcessor::previewChord (int chordIndex, juce::MidiBuffer& midiOut)
-{
-    if (!haveActive) return;
-    auto seq = active.singleChordToMidiSequence (chordIndex, hostBeatsPerBar.load());
-    for (int i = 0; i < seq.getNumEvents(); ++i)
-    {
-        auto* ev = seq.getEventPointer (i);
-        if (ev != nullptr)
-        {
-            midiOut.addEvent (ev->message, 0);
-        }
+juce::File VibeSparkProcessor::writeMidiFile() {
+  ChordGen copy; { juce::SpinLock::ScopedLockType l(lock); copy = state; }
+  juce::MidiMessageSequence seq;
+  const int octOffset = octaveShift.load() * 12;
+  const bool skipB = noBass.load();
+  const bool doStrum = strum.load();
+  const float hm = human.load();
+
+  for (const auto& h : copy.hits) {
+    if (h.chord < 0 || h.chord > 3) continue;
+    const auto& c = copy.voiced[h.chord];
+    const int sz = (int) c.size();
+    for (int j = 0; j < sz; ++j) {
+      const bool isTop = (j == sz - 1);
+      if (skipB && j == 0) continue;
+      if (h.topOnly && !isTop) continue;
+      int note = c[(size_t) j];
+      double endBeat = h.start + h.len;
+      if (isTop && h.sus >= 0) { note = h.sus; endBeat = h.start + h.susLen; }
+      note += octOffset;
+      if (note < 0 || note > 127) continue;
+      const int tickOffset = (!h.topOnly && doStrum) ? j * 15 : 0;
+      const int vel = calcVel(j, isTop, note, h.chord, hm, 0.5f, h.topOnly);
+      seq.addEvent(juce::MidiMessage::noteOn(1, note, (juce::uint8) vel), h.start * 480.0 + tickOffset);
+      seq.addEvent(juce::MidiMessage::noteOff(1, note), endBeat * 480.0 - 10.0);
     }
+  }
+  seq.addEvent(juce::MidiMessage::endOfTrack(), 7680.0);
+  seq.updateMatchedPairs();
+  juce::MidiFile mf; mf.setTicksPerQuarterNote(480); mf.addTrack(seq);
+  auto f = juce::File::getSpecialLocation(juce::File::tempDirectory)
+               .getChildFile("VibeSpark_Chords_" + juce::String(++fileCounter) + ".mid");
+  f.deleteFile();
+  juce::FileOutputStream out(f);
+  if (out.openedOk()) mf.writeTo(out);
+  return f;
 }
 
-void VibeSparkAudioProcessor::pushEvent (juce::int64 pos, int status, int d1, int d2)
-{
-    queue.push_back (Pending { pos, seqCounter++, (juce::uint8) status, (juce::uint8) d1, (juce::uint8) d2 });
-    queueDirty = true;
-}
-
-void VibeSparkAudioProcessor::sortQueue()
-{
-    if (! queueDirty) return;
-    std::sort (queue.begin(), queue.end(), [] (const Pending& a, const Pending& b)
-               { return a.pos != b.pos ? a.pos < b.pos : a.seq < b.seq; });
-    queueDirty = false;
-}
-
-void VibeSparkAudioProcessor::killAfter (juce::int64 start)
-{
-    sortQueue();
-    auto on = sounding;
-    size_t keep = 0;
-    for (size_t i = 0; i < queue.size(); ++i)
-    {
-        if (queue[i].pos >= start) continue;
-        on[queue[i].d1] = (queue[i].status & 0xf0) == 0x90;
-        queue[keep++] = queue[i];
-    }
-    queue.erase (queue.begin() + (long) keep, queue.end());
-    for (int n = 0; n < 128; ++n)
-        if (on[(size_t) n]) pushEvent (start, 0x80, n, 0);
-}
-
-void VibeSparkAudioProcessor::flushAll (juce::int64 at)
-{
-    queue.clear();
-    for (int n = 0; n < 128; ++n)
-        if (sounding[(size_t) n]) pushEvent (at, 0x80, n, 0);
-}
-
-void VibeSparkAudioProcessor::beginCycle (juce::int64 blockStart, bool playing, bool havePpq, double ppq,
-                                          double lastBarPpq, double bpb, double bpm)
-{
-    double offsetSamples = 0.0;
-    if (playing && havePpq && active.lengthBeats > 0.0)
-    {
-        const double totalCycleBeats = active.lengthBeats;
-        double currentProgBeat = std::fmod (ppq, totalCycleBeats);
-        offsetSamples = -currentProgBeat * 60.0 / bpm * currentSampleRate;
-        startedInTransport = true;
-    }
-    else
-    {
-        startedInTransport = false;
-    }
-
-    const juce::int64 start = blockStart + (juce::int64) std::llround (offsetSamples);
-    killAfter (start);
-    nextCycleStart = start;
-    cycleActive = true;
-}
-
-void VibeSparkAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
-{
-    juce::ScopedNoDenormals noDenormals;
-    buffer.clear();
-
-    const int numSamples = buffer.getNumSamples();
-    const double sr = currentSampleRate;
-    const juce::int64 blockStart = samplePos;
-    const juce::int64 blockEnd = blockStart + numSamples;
-    const double nowMs = juce::Time::getMillisecondCounterHiRes();
-    const double blockMs = 1000.0 * numSamples / sr;
-    const bool loopOn = loopParam->load() > 0.5f;
-
-    double bpm = hostBpm.load();
-    double bpb = 4.0, ppq = 0.0, lastBar = 0.0;
-    bool playing = false, havePpq = false;
-
-    if (auto* ph = getPlayHead())
-    {
-        if (auto pos = ph->getPosition())
-        {
-            if (auto b = pos->getBpm()) bpm = *b;
-            playing = pos->getIsPlaying();
-            if (auto ts = pos->getTimeSignature()) bpb = ts->numerator * 4.0 / ts->denominator;
-            if (auto p = pos->getPpqPosition()) { ppq = *p; havePpq = true; }
-            if (auto lb = pos->getPpqPositionOfLastBarStart()) lastBar = *lb;
-            else lastBar = std::floor (ppq / bpb) * bpb;
-        }
-    }
-    bpm = juce::jlimit (20.0, 400.0, bpm);
-    hostBpm.store (bpm);
-    hostBeatsPerBar.store (bpb);
-    hostPlaying.store (playing);
-
-    for (const auto meta : midi)
-    {
-        const auto m = meta.getMessage();
-        if (m.isNoteOn()) lastInputPc.store (m.getNoteNumber() % 12);
-    }
-    midi.clear();
-
-    bool transportRestarted = false;
-    if (playing && havePpq)
-    {
-        if (!wasPlaying || ppq < lastTransportPpq || ppq < 0.1)
-            transportRestarted = true;
-        lastTransportPpq = ppq;
-    }
-
-    const bool risingEdge = !wasPlaying && playing;
-    if (wasPlaying && !playing && startedInTransport)
-    {
-        flushAll (blockStart);
-        cycleActive = haveCycle = startedInTransport = false;
-    }
-    wasPlaying = playing;
-
-    bool newProgression = false;
-    {
-        const juce::SpinLock::ScopedTryLockType lock (handoffLock);
-        if (lock.isLocked() && handoffReady)
-        {
-            active = handoff;
-            handoffReady = false;
-            haveActive = true;
-            newProgression = true;
-        }
-    }
-
-    if (newProgression || risingEdge || transportRestarted)
-    {
-        if (haveActive)
-            beginCycle (blockStart, playing, havePpq, ppq, lastBar, bpb, bpm);
-    }
-
-    const double spb = 60.0 / bpm * sr;
-    const juce::int64 cycleLen = (juce::int64) std::llround (active.lengthBeats * spb);
-    while (cycleActive && nextCycleStart < blockEnd)
-    {
-        for (int i = 0; i < active.n; ++i)
-        {
-            const auto& e = active.ev[(size_t) i];
-            const juce::int64 pos = nextCycleStart
-                                  + (juce::int64) std::llround (e.beat * spb + e.ms * 0.001 * sr);
-            pushEvent (pos, e.on ? 0x90 : 0x80, e.note, e.on ? e.vel : 0);
-        }
-        lastCycleStart = nextCycleStart;
-        lastCycleLen = std::max<juce::int64> (1, cycleLen);
-        haveCycle = true;
-        nextCycleStart += cycleLen;
-        if (! loopOn) cycleActive = false;
-    }
-
-    sortQueue();
-    const bool portOn = portParam->load() > 0.5f && portSender->isActive();
-    size_t keep = 0;
-    for (size_t i = 0; i < queue.size(); ++i)
-    {
-        const Pending e = queue[i];
-        if (e.pos >= blockEnd) { queue[keep++] = e; continue; }
-
-        const int off = (int) juce::jlimit<juce::int64> (0, numSamples - 1, e.pos - blockStart);
-        midi.addEvent (juce::MidiMessage (e.status, e.d1, e.d2), off);
-
-        const bool isOn = (e.status & 0xf0) == 0x90;
-        sounding[e.d1] = isOn;
-        if (portOn)
-        {
-            portSender->push (nowMs + 1000.0 * off / sr + blockMs, e.status, e.d1, e.d2);
-            portNotes[e.d1] = isOn;
-        }
-    }
-    queue.erase (queue.begin() + (long) keep, queue.end());
-
-    if (! portOn && portSender->isActive())
-        for (int n = 0; n < 128; ++n)
-            if (portNotes[(size_t) n])
-            {
-                portSender->push (nowMs + blockMs, 0x80, (juce::uint8) n, 0);
-                portNotes[(size_t) n] = false;
-            }
-
-    if (playing && havePpq) uiBeat = std::max (0.0, ppq - lastBar);
-    else                    uiBeat = std::fmod (uiBeat + numSamples / spb, bpb);
-    beatInBar.store ((float) uiBeat);
-
-    if (haveCycle)
-    {
-        const juce::int64 ref = blockStart + numSamples / 2;
-        const juce::int64 rel = ref - lastCycleStart;
-        if (rel >= lastCycleLen)  currentBar.store (-1);
-        else if (rel >= 0)        currentBar.store (juce::jlimit (0, 3, (int) ((double) rel / ((double) lastCycleLen / 4.0))));
-    }
-    else
-        currentBar.store (-1);
-
-    samplePos = blockEnd;
-}
-
-juce::AudioProcessorEditor* VibeSparkAudioProcessor::createEditor()
-{
-    return new VibeSparkAudioProcessorEditor (*this);
-}
-
-void VibeSparkAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
-{
-    auto state = apvts.copyState();
-    if (auto xml = state.createXml()) copyXmlToBinary (*xml, destData);
-}
-
-void VibeSparkAudioProcessor::setStateInformation (const void* data, int size)
-{
-    if (auto xml = getXmlFromBinary (data, size))
-        if (xml->hasTagName (apvts.state.getType()))
-            apvts.replaceState (juce::ValueTree::fromXml (*xml));
-}
-
-juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
-{
-    return new VibeSparkAudioProcessor();
-}
+juce::AudioProcessorEditor* VibeSparkProcessor::createEditor();
+juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new VibeSparkProcessor(); }

@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.22)
 set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Native Apple Silicon build")
 set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "")
 
-project(VibeSpark VERSION 0.9.0 LANGUAGES C CXX)
+project(VibeSpark VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -42,7 +42,7 @@ juce_add_plugin(VibeSpark
     VST3_CATEGORIES             ${VS_VST3_CAT})
 
 target_sources(VibeSpark PRIVATE
-    Source/ChordEngine.h
+    Source/ChordGen.h
     Source/PluginProcessor.h
     Source/PluginProcessor.cpp
     Source/PluginEditor.h
