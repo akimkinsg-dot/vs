@@ -150,7 +150,7 @@ void VibeSparkAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("VIBESPARK", t.removeFromTop (32), juce::Justification::centredLeft);
     g.setColour (ui::dim);
     g.setFont (ui::font (10.0f));
-    g.drawText ("XY VIBE ENGINE - R&B / TRAPSOUL", t, juce::Justification::centredLeft);
+    g.drawText ("EMPATHETIC XY ENGINE - R&B / TRAPSOUL", t, juce::Justification::centredLeft);
 
     auto b = bpmArea.toFloat();
     g.setColour (ui::panel);  g.fillRoundedRectangle (b, 10.0f);

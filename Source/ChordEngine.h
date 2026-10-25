@@ -105,24 +105,28 @@ struct ProgTemplate
     const char* name;
     float temp;
     int minChords;
+    bool allowSilence; // Empathetic breathing / pockets
     std::array<Step, 4> s;
 };
 
 inline const std::vector<ProgTemplate>& library()
 {
     static const std::vector<ProgTemplate> lib = {
-        { "2AM Floating",       0.05f, 2, {{ {0,Min9},  {8,Maj9},    {0,Min9},    {8,Maj9}    }} },
-        { "Ethereal Drift",     0.12f, 3, {{ {0,Min11}, {8,Maj7s11}, {3,Sus4},    {0,Min11}   }} },
-        { "Cinematic Haze",     0.20f, 2, {{ {0,Min11}, {5,Min9},    {0,Min11},   {5,Min9}    }} },
-        { "Deep Space Vibe",    0.28f, 3, {{ {0,Min9},  {1,Maj7},    {10,Dom9},   {0,Min9}    }} },
-        { "Velvet Drive",       0.38f, 2, {{ {0,Min9},  {5,Min9},    {0,Min9},    {5,Min9}    }} },
-        { "Late Night Call",    0.45f, 3, {{ {0,Min9},  {5,Dom9},    {8,Maj9},    {0,Min9}    }} },
-        { "Dorian Silk",        0.52f, 4, {{ {0,Min9},  {5,Dom13},   {0,Min11},   {10,Maj9}   }} },
-        { "Golden Hour R&B",    0.60f, 3, {{ {0,Min9},  {3,Maj9},    {8,Maj7},    {0,Min9}    }} },
-        { "Neo-Soul Elegance",  0.72f, 4, {{ {0,Maj13}, {5,Dom9},    {3,Maj9},    {8,Maj7s11} }} },
-        { "Smooth Operator",    0.80f, 4, {{ {0,Maj9},  {9,Min9},    {2,Min11},   {7,Dom13}   }} },
-        { "Sunday Butter",      0.88f, 3, {{ {0,Maj9},  {4,Min9},    {9,Min11},   {0,Maj9}    }} },
-        { "Jazz-Hop Royalty",   0.95f, 4, {{ {2,Min11}, {7,Dom13},   {0,Maj13},   {9,Min9}    }} }
+        // --- ZONE 1: ETHEREAL VOID (Cold + Cinematic) ---
+        { "Ethereal Drift",     0.10f, 3, true,  {{ {0,Min11}, {8,Maj7s11}, {3,Sus4},    {0,Min11}   }} },
+        { "Deep Space Vibe",    0.20f, 3, true,  {{ {0,Min9},  {1,Maj7},    {10,Dom9},   {0,Min9}    }} },
+
+        // --- ZONE 2: GOLDEN HOUR HEARTBREAK (Warm + Cinematic) ---
+        { "Golden Hour R&B",    0.80f, 4, false, {{ {0,Min9},  {3,Maj9},    {8,Maj7},    {5,Min6}    }} },
+        { "Neo-Soul Elegance",  0.90f, 4, false, {{ {0,Maj13}, {5,Dom9},    {3,Maj9},    {8,Maj7s11} }} },
+
+        // --- ZONE 3: LATE NIGHT DRIVE (Warm + Intimate) ---
+        { "Velvet Drive",       0.70f, 2, true,  {{ {0,Min9},  {5,Min9},    {0,Min9},    {5,Min9}    }} },
+        { "Sunday Butter",      0.85f, 3, true,  {{ {0,Maj9},  {4,Min9},    {9,Min11},   {0,Maj9}    }} },
+
+        // --- ZONE 4: 2AM CONFESSION (Cold + Intimate) ---
+        { "2AM Floating",       0.05f, 2, true,  {{ {0,Min9},  {8,Maj9},    {0,Min9},    {8,Maj9}    }} },
+        { "Late Night Call",    0.40f, 3, true,  {{ {0,Min9},  {5,Dom9},    {8,Maj9},    {0,Min9}    }} }
     };
     return lib;
 }
@@ -158,9 +162,10 @@ public:
         double total = 0.0;
         for (size_t i = 0; i < lib.size(); ++i)
         {
-            const double d = (double) vibeX - (double) lib[i].temp;
-            w[i] = std::exp (-d * d / (2.0 * 0.20 * 0.20)) + 0.01;
-            if ((int) i == lastProgression) w[i] *= 0.05;
+            const double dx = (double) vibeX - (double) lib[i].temp;
+            // Match templates based on emotional distance across XY coordinates
+            w[i] = std::exp (-dx * dx / (2.0 * 0.25 * 0.25)) + 0.01;
+            if ((int) i == lastProgression) w[i] *= 0.1;
             total += w[i];
         }
 
@@ -174,6 +179,7 @@ public:
         lastProgression = idx;
         auto steps = lib[(size_t) idx].s;
         const int numChords = lib[(size_t) idx].minChords;
+        const bool allowSilence = lib[(size_t) idx].allowSilence;
 
         std::array<int, 4> rootPc {};
         std::array<Voicing, 4> vo;
@@ -200,6 +206,9 @@ public:
         const double barDuration = (4.0 * bpb) / (double) numChords;
         for (int i = 0; i < numChords; ++i)
         {
+            // Empathetic silence / pocket: skip playing chord on the last bar if allowed
+            if (allowSilence && vibeY < 0.35f && i == numChords - 1 && numChords > 2) continue;
+
             const auto& v = vo[(size_t) i];
             const double chordStart = (double) i * barDuration;
             const double chordEnd = chordStart + barDuration;
@@ -208,13 +217,14 @@ public:
             for (int j = 0; j < totalVoices; ++j)
             {
                 const int note = (j == 0) ? v.bass : v.up[(size_t) j - 1];
-                int vel = 78 + (j == totalVoices - 1 ? 10 : 0) + (rng.nextInt (10) - 5);
-                if (j == 0) vel -= 6;
+                int vel = 75 + (j == totalVoices - 1 ? 12 : 0) + (rng.nextInt (10) - 5);
+                if (j == 0) vel -= 8;
                 vel = juce::jlimit (1, 127, vel);
 
-                const float strum = (float) j * (2.0f + (1.0f - vibeY) * 3.0f);
+                // Humanized strumming based on vertical intimacy axis
+                const float strum = (float) j * (1.5f + (1.0f - vibeY) * 3.5f);
                 out.add (chordStart, strum, note, vel, true);
-                out.add (chordEnd - 0.08, -2.0f, note, 0, false);
+                out.add (chordEnd - 0.1, -2.0f, note, 0, false);
             }
         }
     }
@@ -225,7 +235,7 @@ private:
     static Voicing voice (int rootPc, const ChordType& ct, const Voicing* prev, float spaceY)
     {
         Voicing v;
-        const int bassMin = (int) std::lround (juce::jmap (spaceY, 36.0f, 28.0f));
+        const int bassMin = (int) std::lround (juce::jmap (spaceY, 36.0f, 26.0f));
         const int bassMax = bassMin + 12;
         const int ref = prev != nullptr ? prev->bass : bassMin + 5;
         int bestD = INT_MAX;
@@ -240,8 +250,8 @@ private:
             pcs[(size_t) np++] = (rootPc + ct.iv[(size_t) i]) % 12;
         }
 
-        const int lo = std::max ((int) std::lround (juce::jmap (spaceY, 56.0f, 48.0f)), v.bass + 7);
-        const int hi = (int) std::lround (juce::jmap (spaceY, 70.0f, 85.0f));
+        const int lo = std::max ((int) std::lround (juce::jmap (spaceY, 54.0f, 46.0f)), v.bass + 7);
+        const int hi = (int) std::lround (juce::jmap (spaceY, 68.0f, 84.0f));
 
         std::array<int, 6> cur {}, best {};
         double bestCost = 1.0e18;

@@ -47,6 +47,7 @@ public:
     }
 };
 
+// --- EMPATHETIC XY VIBE PAD WITH 4 CORNER PSYCHOLOGY SCENARIOS ---
 class XYVibePad : public juce::Component
 {
 public:
@@ -83,23 +84,25 @@ public:
         g.drawHorizontalLine ((int) (r.getHeight() * 0.5f), 0.0f, r.getWidth());
         g.drawVerticalLine ((int) (r.getWidth() * 0.5f), 0.0f, r.getHeight());
 
+        // 4 Psychological Corner Scenarios
         g.setFont (ui::font (10.0f));
         g.setColour (ui::cold);
-        g.drawText ("COLD / 2AM", r.reduced (10.0f), juce::Justification::bottomLeft);
+        g.drawText ("2AM CONFESSION", r.reduced (12.0f), juce::Justification::bottomLeft);
         g.setColour (ui::warm);
-        g.drawText ("WARM / SOUL", r.reduced (10.0f), juce::Justification::bottomRight);
-        g.setColour (ui::text.withAlpha (0.6f));
-        g.drawText ("WIDE SPREAD", r.reduced (10.0f), juce::Justification::topRight);
-        g.drawText ("INTIMATE / TIGHT", r.reduced (10.0f), juce::Justification::topLeft);
+        g.drawText ("LATE NIGHT DRIVE", r.reduced (12.0f), juce::Justification::bottomRight);
+        g.setColour (ui::text.withAlpha (0.7f));
+        g.drawText ("GOLDEN HOUR HEARTBREAK", r.reduced (12.0f), juce::Justification::topRight);
+        g.drawText ("ETHEREAL VOID", r.reduced (12.0f), juce::Justification::topLeft);
 
+        // Dynamic active state label in center if hovering/moving
         const float px = padX * r.getWidth();
         const float py = (1.0f - padY) * r.getHeight();
         auto dotArea = juce::Rectangle<float> (24.0f, 24.0f).withCentre ({ px, py });
 
-        juce::ColourGradient halo (currentAccent.withAlpha (0.5f), px, py,
-                                   currentAccent.withAlpha (0.0f), px + 28.0f, py, true);
+        juce::ColourGradient halo (currentAccent.withAlpha (0.55f), px, py,
+                                   currentAccent.withAlpha (0.0f), px + 30.0f, py, true);
         g.setGradientFill (halo);
-        g.fillEllipse (dotArea.expanded (12.0f));
+        g.fillEllipse (dotArea.expanded (14.0f));
 
         g.setColour (ui::text);
         g.fillEllipse (dotArea);
