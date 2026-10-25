@@ -137,8 +137,8 @@ private:
     juce::int64 nextCycleStart = 0, lastCycleStart = 0, lastCycleLen = 1;
     double uiBeat = 0.0;
 
-    std::atomic<float>* vibeParam = nullptr;
-    std::atomic<float>* spaceParam = nullptr;
+    std::atomic<float>* vibeXParam = nullptr;
+    std::atomic<float>* vibeYParam = nullptr;
     std::atomic<float>* keyParam = nullptr;
     std::atomic<float>* loopParam = nullptr;
     std::atomic<float>* portParam = nullptr;

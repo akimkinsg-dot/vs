@@ -33,55 +33,6 @@ public:
         setColour (juce::PopupMenu::highlightedBackgroundColourId, ui::line);
     }
 
-    juce::Colour vibeColour (float t) const { return ui::cold.interpolatedWith (ui::warm, t); }
-
-    void drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h, float pos,
-                           float startAngle, float endAngle, juce::Slider&) override
-    {
-        auto b = juce::Rectangle<float> ((float) x, (float) y, (float) w, (float) h).reduced (16.0f);
-        const float radius = juce::jmin (b.getWidth(), b.getHeight()) * 0.5f;
-        const auto c = b.getCentre();
-        const float angle = startAngle + pos * (endAngle - startAngle);
-        const auto col = vibeColour (pos);
-
-        juce::ColourGradient glow (col.withAlpha (0.25f), c, col.withAlpha (0.0f),
-                                   c.translated (radius * 1.45f, 0.0f), true);
-        g.setGradientFill (glow);
-        g.fillEllipse (b.expanded (radius * 0.45f));
-
-        g.setColour (ui::panel);
-        g.fillEllipse (b.reduced (radius * 0.14f));
-        g.setColour (ui::line);
-        g.drawEllipse (b.reduced (radius * 0.14f), 1.5f);
-
-        const float arcR = radius - 4.0f;
-        juce::Path track, val;
-        track.addCentredArc (c.x, c.y, arcR, arcR, 0.0f, startAngle, endAngle, true);
-        val.addCentredArc   (c.x, c.y, arcR, arcR, 0.0f, startAngle, angle, true);
-        const juce::PathStrokeType st (4.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
-        g.setColour (ui::line); g.strokePath (track, st);
-        g.setColour (col);      g.strokePath (val, st);
-
-        juce::Path p;
-        p.addRoundedRectangle (-2.0f, -(arcR - 12.0f), 4.0f, radius * 0.30f, 2.0f);
-        g.setColour (ui::text);
-        g.fillPath (p, juce::AffineTransform::rotation (angle).translated (c.x, c.y));
-    }
-
-    void drawLinearSlider (juce::Graphics& g, int x, int y, int w, int h, float sliderPos,
-                           float, float, juce::Slider::SliderStyle, juce::Slider&) override
-    {
-        const float cx = (float) x + (float) w * 0.5f;
-        const float top = (float) y + 6.0f, bottom = (float) (y + h) - 6.0f;
-        g.setColour (ui::line);
-        g.fillRoundedRectangle (cx - 2.0f, top, 4.0f, bottom - top, 2.0f);
-        g.setColour (ui::violet);
-        g.fillRoundedRectangle (cx - 2.0f, sliderPos, 4.0f, bottom - sliderPos, 2.0f);
-        auto thumb = juce::Rectangle<float> (28.0f, 12.0f).withCentre ({ cx, sliderPos });
-        g.setColour (ui::text);   g.fillRoundedRectangle (thumb, 6.0f);
-        g.setColour (ui::violet); g.drawRoundedRectangle (thumb, 6.0f, 1.5f);
-    }
-
     void drawToggleButton (juce::Graphics& g, juce::ToggleButton& b, bool over, bool) override
     {
         auto r = b.getLocalBounds().toFloat();
@@ -94,6 +45,79 @@ public:
         g.drawText (b.getButtonText().toUpperCase(), r.withTrimmedLeft (6.0f).toNearestInt(),
                     juce::Justification::centredLeft);
     }
+};
+
+class XYVibePad : public juce::Component
+{
+public:
+    std::function<void(float, float)> onPadChanged;
+
+    void setPosition (float x, float y)
+    {
+        padX = juce::jlimit (0.0f, 1.0f, x);
+        padY = juce::jlimit (0.0f, 1.0f, y);
+        repaint();
+    }
+
+    float getXVal() const { return padX; }
+    float getYVal() const { return padY; }
+
+    void mouseDown (const juce::MouseEvent& e) override { updateFromMouse (e); }
+    void mouseDrag (const juce::MouseEvent& e) override { updateFromMouse (e); }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto r = getLocalBounds().toFloat();
+        g.setColour (ui::panel);
+        g.fillRoundedRectangle (r, 12.0f);
+        g.setColour (ui::line);
+        g.drawRoundedRectangle (r.reduced (0.5f), 12.0f, 1.0f);
+
+        juce::Colour currentAccent = ui::cold.interpolatedWith (ui::warm, padX);
+        juce::ColourGradient grad (ui::cold.withAlpha (0.12f), 0.0f, r.getBottom(),
+                                   ui::warm.withAlpha (0.12f), r.getRight(), 0.0f, false);
+        g.setGradientFill (grad);
+        g.fillRoundedRectangle (r, 12.0f);
+
+        g.setColour (ui::line.withAlpha (0.4f));
+        g.drawHorizontalLine ((int) (r.getHeight() * 0.5f), 0.0f, r.getWidth());
+        g.drawVerticalLine ((int) (r.getWidth() * 0.5f), 0.0f, r.getHeight());
+
+        g.setFont (ui::font (10.0f));
+        g.setColour (ui::cold);
+        g.drawText ("COLD / 2AM", r.reduced (10.0f), juce::Justification::bottomLeft);
+        g.setColour (ui::warm);
+        g.drawText ("WARM / SOUL", r.reduced (10.0f), juce::Justification::bottomRight);
+        g.setColour (ui::text.withAlpha (0.6f));
+        g.drawText ("WIDE SPREAD", r.reduced (10.0f), juce::Justification::topRight);
+        g.drawText ("INTIMATE / TIGHT", r.reduced (10.0f), juce::Justification::topLeft);
+
+        const float px = padX * r.getWidth();
+        const float py = (1.0f - padY) * r.getHeight();
+        auto dotArea = juce::Rectangle<float> (24.0f, 24.0f).withCentre ({ px, py });
+
+        juce::ColourGradient halo (currentAccent.withAlpha (0.5f), px, py,
+                                   currentAccent.withAlpha (0.0f), px + 28.0f, py, true);
+        g.setGradientFill (halo);
+        g.fillEllipse (dotArea.expanded (12.0f));
+
+        g.setColour (ui::text);
+        g.fillEllipse (dotArea);
+        g.setColour (currentAccent);
+        g.drawEllipse (dotArea, 2.5f);
+    }
+
+private:
+    void updateFromMouse (const juce::MouseEvent& e)
+    {
+        auto r = getLocalBounds().toFloat();
+        padX = juce::jlimit (0.0f, 1.0f, e.x / r.getWidth());
+        padY = juce::jlimit (0.0f, 1.0f, 1.0f - (e.y / r.getHeight()));
+        repaint();
+        if (onPadChanged) onPadChanged (padX, padY);
+    }
+
+    float padX = 0.5f, padY = 0.5f;
 };
 
 class SparkButton : public juce::Button
@@ -152,7 +176,8 @@ private:
 class ChordStrip : public juce::Component
 {
 public:
-    std::function<void()> onStartDrag;
+    std::function<void()> onStartDragAll;
+    std::function<void(int)> onStartDragSingle;
 
     void setChords (const juce::StringArray& names, const juce::String& t)
     {
@@ -161,9 +186,17 @@ public:
     void setActive (int i) { if (i != active) { active = i; repaint(); } }
     void setAccent (juce::Colour c) { if (c != accent) { accent = c; repaint(); } }
 
-    void mouseDown (const juce::MouseEvent&) override
+    void mouseDown (const juce::MouseEvent& e) override
     {
-        if (onStartDrag) onStartDrag();
+        int clickedIdx = getChordIndexAt (e.getMouseDownX());
+        if (clickedIdx >= 0 && clickedIdx < chords.size())
+        {
+            if (onStartDragSingle) onStartDragSingle (clickedIdx);
+        }
+        else
+        {
+            if (onStartDragAll) onStartDragAll();
+        }
     }
 
     void paint (juce::Graphics& g) override
@@ -171,13 +204,14 @@ public:
         auto r = getLocalBounds().toFloat();
         g.setColour (ui::dim);
         g.setFont (ui::font (10.5f));
-        g.drawText (title.isEmpty() ? juce::String ("PRESS SPARK") : title.toUpperCase() + "  (DRAG MIDI)",
+        g.drawText (title.isEmpty() ? juce::String ("PRESS SPARK") : title.toUpperCase() + "  (DRAG CHORD OR ALL)",
                     r.removeFromTop (18.0f).toNearestInt(), juce::Justification::centredLeft);
         r.removeFromTop (4.0f);
 
         const float gap = 10.0f;
-        const float w = (r.getWidth() - gap * 3.0f) / 4.0f;
-        for (int i = 0; i < 4; ++i)
+        const int numChords = std::max (1, chords.size());
+        const float w = (r.getWidth() - gap * (float)(numChords - 1)) / (float)numChords;
+        for (int i = 0; i < numChords; ++i)
         {
             auto tile = juce::Rectangle<float> (r.getX() + (float) i * (w + gap), r.getY(), w, r.getHeight());
             const bool act = (i == active);
@@ -187,7 +221,7 @@ public:
             g.drawRoundedRectangle (tile.reduced (0.5f), 10.0f, act ? 2.0f : 1.0f);
 
             g.setColour (act ? juce::Colours::white : ui::text);
-            g.setFont (ui::font (20.0f));
+            g.setFont (ui::font (18.0f));
             g.drawText (i < chords.size() ? chords[i] : juce::String ("-"),
                         tile.toNearestInt(), juce::Justification::centred);
             g.setColour (ui::dim);
@@ -198,6 +232,21 @@ public:
     }
 
 private:
+    int getChordIndexAt (float x) const
+    {
+        auto r = getLocalBounds().toFloat().withTrimmedTop(22.0f);
+        const float gap = 10.0f;
+        const int numChords = std::max (1, chords.size());
+        const float w = (r.getWidth() - gap * (float)(numChords - 1)) / (float)numChords;
+        
+        for (int i = 0; i < numChords; ++i)
+        {
+            float tileX = r.getX() + (float) i * (w + gap);
+            if (x >= tileX && x <= tileX + w) return i;
+        }
+        return -1;
+    }
+
     juce::StringArray chords;
     juce::String title;
     int active = -1;
@@ -215,25 +264,24 @@ public:
 
 private:
     void timerCallback() override;
-    void exportAndDragMidi();
+    void exportAndDragAllMidi();
+    void exportAndDragSingleMidi (int index);
 
     VibeSparkAudioProcessor& proc;
     VibeLookAndFeel laf;
 
-    juce::Slider vibeSlider, spaceSlider;
+    XYVibePad vibePad;
     SparkButton sparkButton;
     ChordStrip chordStrip;
     juce::ComboBox keyBox;
     juce::ToggleButton loopButton { "Loop" }, portButton { "Virtual MIDI port" };
 
-    using SA = juce::AudioProcessorValueTreeState::SliderAttachment;
     using CA = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
     using BA = juce::AudioProcessorValueTreeState::ButtonAttachment;
-    std::unique_ptr<SA> vibeAtt, spaceAtt;
     std::unique_ptr<CA> keyAtt;
     std::unique_ptr<BA> loopAtt, portAtt;
 
-    juce::Rectangle<int> titleArea, bpmArea, knobArea, spaceArea, sparkArea, footerArea;
+    juce::Rectangle<int> titleArea, bpmArea, padArea, sparkArea, footerArea;
     double bpm = 120.0;
     bool playing = false;
     float beat = 0.0f;

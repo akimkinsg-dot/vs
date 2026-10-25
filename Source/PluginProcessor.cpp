@@ -6,9 +6,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout VibeSparkAudioProcessor::cre
     using namespace juce;
     AudioProcessorValueTreeState::ParameterLayout l;
 
-    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "vibe", 1 },  "Vibe",
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "vibeX", 1 }, "Vibe X",
            NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
-    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "space", 1 }, "Space",
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "vibeY", 1 }, "Vibe Y",
            NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
 
     StringArray keys { "Random", "Last MIDI Note", "C", "C#/Db", "D", "D#/Eb", "E", "F",
@@ -27,8 +27,8 @@ VibeSparkAudioProcessor::VibeSparkAudioProcessor()
                       ),
       apvts (*this, nullptr, "VIBESPARK_STATE", createLayout())
 {
-    vibeParam  = apvts.getRawParameterValue ("vibe");
-    spaceParam = apvts.getRawParameterValue ("space");
+    vibeXParam = apvts.getRawParameterValue ("vibeX");
+    vibeYParam = apvts.getRawParameterValue ("vibeY");
     keyParam   = apvts.getRawParameterValue ("key");
     loopParam  = apvts.getRawParameterValue ("loop");
     portParam  = apvts.getRawParameterValue ("port");
@@ -80,7 +80,7 @@ void VibeSparkAudioProcessor::requestSpark()
     vs::Progression p;
     juce::StringArray names;
     juce::String name;
-    engine.generate (vibeParam->load(), spaceParam->load(), keyPc,
+    engine.generate (vibeXParam->load(), vibeYParam->load(), keyPc,
                      hostBpm.load(), hostBeatsPerBar.load(), p, names, name);
 
     {

@@ -34,7 +34,7 @@ struct Progression
     {
         juce::ignoreUnused (bpb);
         juce::MidiMessageSequence seq;
-        const double ppqScale = 960.0; // Standard ticks per quarter note
+        const double ppqScale = 960.0;
         for (int i = 0; i < n; ++i)
         {
             const auto& e = ev[(size_t) i];
@@ -42,6 +42,30 @@ struct Progression
             juce::MidiMessage m = e.on ? juce::MidiMessage::noteOn (1, e.note, (juce::uint8) e.vel)
                                        : juce::MidiMessage::noteOff (1, e.note);
             seq.addEvent (m, timestamp);
+        }
+        seq.updateMatchedPairs();
+        return seq;
+    }
+
+    juce::MidiMessageSequence singleChordToMidiSequence (int chordIndex, double bpb = 4.0) const
+    {
+        juce::MidiMessageSequence seq;
+        const double ppqScale = 960.0;
+        const double chordDuration = bpb;
+        const double startTime = (double) chordIndex * chordDuration;
+        const double endTime = startTime + chordDuration;
+
+        for (int i = 0; i < n; ++i)
+        {
+            const auto& e = ev[(size_t) i];
+            if (e.beat >= startTime && e.beat < endTime)
+            {
+                double relativeBeat = e.beat - startTime;
+                double timestamp = relativeBeat * ppqScale + (e.ms * 0.001 * 2.0 * ppqScale);
+                juce::MidiMessage m = e.on ? juce::MidiMessage::noteOn (1, e.note, (juce::uint8) e.vel)
+                                           : juce::MidiMessage::noteOff (1, e.note);
+                seq.addEvent (m, timestamp);
+            }
         }
         seq.updateMatchedPairs();
         return seq;
@@ -79,32 +103,26 @@ struct Step { int semis; Quality q; };
 struct ProgTemplate
 {
     const char* name;
-    float temp; // 0.0 = Ambient/Dark -> 1.0 = Neo-Soul/Jazz
+    float temp;
+    int minChords;
     std::array<Step, 4> s;
 };
 
 inline const std::vector<ProgTemplate>& library()
 {
     static const std::vector<ProgTemplate> lib = {
-        // --- AMBIENT & DARK TRAPSOUL (0.0 - 0.3) ---
-        { "Ethereal Drift",     0.02f, {{ {0,Min11}, {8,Maj7s11}, {3,Sus4},    {5,Min9}    }} },
-        { "2AM Floating",       0.08f, {{ {0,Min9},  {8,Maj9},    {3,Add9},    {10,Sus4}   }} },
-        { "Cinematic Haze",     0.12f, {{ {0,Min11}, {5,Min9},    {8,Maj7s11}, {7,Dom7sus} }} },
-        { "Deep Space Soul",    0.20f, {{ {0,Min9},  {1,Maj7},    {10,Dom9},   {0,Min11}   }} },
-        { "Submerged Memories", 0.28f, {{ {0,Min7},  {8,Maj9},    {10,Sus4},   {3,Maj7}    }} },
-
-        // --- MODERN R&B & ALTERNATIVE (0.3 - 0.6) ---
-        { "Velvet Drive",       0.35f, {{ {0,Min9},  {3,Maj7},    {5,Min9},    {7,Min7}    }} },
-        { "Late Night Call",    0.42f, {{ {0,Min9},  {5,Dom9},    {8,Maj9},    {10,Add9}   }} },
-        { "Dorian Silk",        0.48f, {{ {0,Min9},  {5,Dom13},   {0,Min11},   {10,Maj9}   }} },
-        { "Golden Hour R&B",    0.55f, {{ {0,Min9},  {3,Maj9},    {8,Maj7},    {5,Min6}    }} },
-
-        // --- NEO-SOUL & JAZZ-INFUSED (0.6 - 1.0) ---
-        { "Neo-Soul Elegance",  0.65f, {{ {0,Maj13}, {5,Dom9},    {3,Maj9},    {8,Maj7s11} }} },
-        { "Smooth Operator",    0.74f, {{ {0,Maj9},  {9,Min9},    {2,Min11},   {7,Dom13}   }} },
-        { "Sunday Butter",      0.82f, {{ {0,Maj9},  {4,Min9},    {9,Min11},   {2,Min9}    }} },
-        { "Jazz-Hop Royalty",   0.90f, {{ {2,Min11}, {7,Dom13},   {0,Maj13},   {9,Min9}    }} },
-        { "2000s Slow Jam",     0.98f, {{ {5,Maj13}, {4,Min9},    {2,Min11},   {0,Maj9}    }} }
+        { "2AM Floating",       0.05f, 2, {{ {0,Min9},  {8,Maj9},    {0,Min9},    {8,Maj9}    }} },
+        { "Ethereal Drift",     0.12f, 3, {{ {0,Min11}, {8,Maj7s11}, {3,Sus4},    {0,Min11}   }} },
+        { "Cinematic Haze",     0.20f, 2, {{ {0,Min11}, {5,Min9},    {0,Min11},   {5,Min9}    }} },
+        { "Deep Space Vibe",    0.28f, 3, {{ {0,Min9},  {1,Maj7},    {10,Dom9},   {0,Min9}    }} },
+        { "Velvet Drive",       0.38f, 2, {{ {0,Min9},  {5,Min9},    {0,Min9},    {5,Min9}    }} },
+        { "Late Night Call",    0.45f, 3, {{ {0,Min9},  {5,Dom9},    {8,Maj9},    {0,Min9}    }} },
+        { "Dorian Silk",        0.52f, 4, {{ {0,Min9},  {5,Dom13},   {0,Min11},   {10,Maj9}   }} },
+        { "Golden Hour R&B",    0.60f, 3, {{ {0,Min9},  {3,Maj9},    {8,Maj7},    {0,Min9}    }} },
+        { "Neo-Soul Elegance",  0.72f, 4, {{ {0,Maj13}, {5,Dom9},    {3,Maj9},    {8,Maj7s11} }} },
+        { "Smooth Operator",    0.80f, 4, {{ {0,Maj9},  {9,Min9},    {2,Min11},   {7,Dom13}   }} },
+        { "Sunday Butter",      0.88f, 3, {{ {0,Maj9},  {4,Min9},    {9,Min11},   {0,Maj9}    }} },
+        { "Jazz-Hop Royalty",   0.95f, 4, {{ {2,Min11}, {7,Dom13},   {0,Maj13},   {9,Min9}    }} }
     };
     return lib;
 }
@@ -122,12 +140,12 @@ public:
         return n[((pc % 12) + 12) % 12];
     }
 
-    void generate (float vibe, float space, int keyPc, double bpm, double beatsPerBar,
+    void generate (float vibeX, float vibeY, int keyPc, double bpm, double beatsPerBar,
                    Progression& out, juce::StringArray& chordNames, juce::String& progName)
     {
         juce::ignoreUnused (bpm);
-        vibe  = juce::jlimit (0.0f, 1.0f, vibe);
-        space = juce::jlimit (0.0f, 1.0f, space);
+        vibeX = juce::jlimit (0.0f, 1.0f, vibeX);
+        vibeY = juce::jlimit (0.0f, 1.0f, vibeY);
         keyPc = ((keyPc % 12) + 12) % 12;
         const double bpb = juce::jlimit (2.0, 8.0, beatsPerBar);
 
@@ -140,9 +158,9 @@ public:
         double total = 0.0;
         for (size_t i = 0; i < lib.size(); ++i)
         {
-            const double d = (double) vibe - (double) lib[i].temp;
-            w[i] = std::exp (-d * d / (2.0 * 0.18 * 0.18)) + 0.01;
-            if ((int) i == lastProgression) w[i] *= 0.05; // Prevent repeating same preset
+            const double d = (double) vibeX - (double) lib[i].temp;
+            w[i] = std::exp (-d * d / (2.0 * 0.20 * 0.20)) + 0.01;
+            if ((int) i == lastProgression) w[i] *= 0.05;
             total += w[i];
         }
 
@@ -155,61 +173,48 @@ public:
         }
         lastProgression = idx;
         auto steps = lib[(size_t) idx].s;
+        const int numChords = lib[(size_t) idx].minChords;
 
         std::array<int, 4> rootPc {};
         std::array<Voicing, 4> vo;
-        for (size_t i = 0; i < 4; ++i)
+        for (int i = 0; i < 4; ++i)
         {
-            rootPc[i] = (keyPc + steps[i].semis) % 12;
-            chordNames.add (noteName (rootPc[i]) + chordType (steps[i].q).suffix);
+            rootPc[(size_t) i] = (keyPc + steps[(size_t) i].semis) % 12;
+            if (i < numChords)
+                chordNames.add (noteName (rootPc[(size_t) i]) + chordType (steps[(size_t) i].q).suffix);
         }
 
         const Voicing* prev = nullptr;
         for (int pass = 0; pass < 2; ++pass)
         {
-            for (size_t i = 0; i < 4; ++i)
+            for (int i = 0; i < 4; ++i)
             {
-                vo[i] = voice (rootPc[i], chordType (steps[i].q), prev, space);
-                prev = &vo[i];
+                vo[(size_t) i] = voice (rootPc[(size_t) i], chordType (steps[(size_t) i].q), prev, vibeY);
+                prev = &vo[(size_t) i];
             }
             prev = &vo[3];
         }
 
         progName = juce::String (lib[(size_t) idx].name) + " - " + noteName (keyPc);
 
-        // --- RHYTHM & ARTICULATION (Natural Grooves, No Clunky Duplicates) ---
-        for (size_t i = 0; i < 4; ++i)
+        const double barDuration = (4.0 * bpb) / (double) numChords;
+        for (int i = 0; i < numChords; ++i)
         {
-            const auto& v = vo[i];
-            const double barStart = (double) i * bpb;
-            const double chordEnd = barStart + bpb;
+            const auto& v = vo[(size_t) i];
+            const double chordStart = (double) i * barDuration;
+            const double chordEnd = chordStart + barDuration;
             const int totalVoices = 1 + v.nUp;
 
-            // Main chord strike at the start of each bar
             for (int j = 0; j < totalVoices; ++j)
             {
                 const int note = (j == 0) ? v.bass : v.up[(size_t) j - 1];
-                int vel = 80 + (j == totalVoices - 1 ? 8 : 0) + (rng.nextInt (12) - 6);
-                if (j == 0) vel -= 5;
+                int vel = 78 + (j == totalVoices - 1 ? 10 : 0) + (rng.nextInt (10) - 5);
+                if (j == 0) vel -= 6;
                 vel = juce::jlimit (1, 127, vel);
 
-                const float strum = (float) j * (2.5f + rng.nextFloat() * 3.5f);
-                out.add (barStart, strum, note, vel, true);
-                out.add (chordEnd - 0.05, -2.0f, note, 0, false);
-            }
-
-            // Optional subtle syncopated rhythmic push on the 2nd or 4th bar
-            if ((i == 1 || i == 3) && rng.nextFloat() < 0.45f)
-            {
-                const double pushBeat = barStart + (bpb * 0.75); // 16th note before next bar
-                for (int j = 1; j < totalVoices; ++j) // upper voices soft re-strike
-                {
-                    const int note = v.up[(size_t) j - 1];
-                    int vel = 60 + (rng.nextInt (10) - 5);
-                    const float strum = (float) j * 2.0f;
-                    out.add (pushBeat, strum, note, vel, true);
-                    out.add (chordEnd - 0.02, -2.0f, note, 0, false);
-                }
+                const float strum = (float) j * (2.0f + (1.0f - vibeY) * 3.0f);
+                out.add (chordStart, strum, note, vel, true);
+                out.add (chordEnd - 0.08, -2.0f, note, 0, false);
             }
         }
     }
@@ -217,10 +222,10 @@ public:
 private:
     struct Voicing { int bass = 36; int nUp = 0; std::array<int, 6> up {}; };
 
-    static Voicing voice (int rootPc, const ChordType& ct, const Voicing* prev, float space)
+    static Voicing voice (int rootPc, const ChordType& ct, const Voicing* prev, float spaceY)
     {
         Voicing v;
-        const int bassMin = (int) std::lround (juce::jmap (space, 36.0f, 28.0f));
+        const int bassMin = (int) std::lround (juce::jmap (spaceY, 36.0f, 28.0f));
         const int bassMax = bassMin + 12;
         const int ref = prev != nullptr ? prev->bass : bassMin + 5;
         int bestD = INT_MAX;
@@ -235,8 +240,8 @@ private:
             pcs[(size_t) np++] = (rootPc + ct.iv[(size_t) i]) % 12;
         }
 
-        const int lo = std::max ((int) std::lround (juce::jmap (space, 55.0f, 48.0f)), v.bass + 7);
-        const int hi = (int) std::lround (juce::jmap (space, 72.0f, 84.0f));
+        const int lo = std::max ((int) std::lround (juce::jmap (spaceY, 56.0f, 48.0f)), v.bass + 7);
+        const int hi = (int) std::lround (juce::jmap (spaceY, 70.0f, 85.0f));
 
         std::array<int, 6> cur {}, best {};
         double bestCost = 1.0e18;
