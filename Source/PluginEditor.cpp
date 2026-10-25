@@ -4,7 +4,7 @@ VibeSparkAudioProcessorEditor::VibeSparkAudioProcessorEditor (VibeSparkAudioProc
     : AudioProcessorEditor (&p), proc (p)
 {
     setLookAndFeel (&laf);
-    setSize (640, 500);
+    setSize (640, 480);
 
     addAndMakeVisible (vibePad);
     vibePad.setPosition (*proc.apvts.getRawParameterValue ("vibeX"),
@@ -13,20 +13,20 @@ VibeSparkAudioProcessorEditor::VibeSparkAudioProcessorEditor (VibeSparkAudioProc
     {
         if (auto* px = proc.apvts.getParameter ("vibeX")) px->setValueNotifyingHost (x);
         if (auto* py = proc.apvts.getParameter ("vibeY")) py->setValueNotifyingHost (y);
-    };
-
-    addAndMakeVisible (sparkButton);
-    sparkButton.onClick = [this]
-    {
+        
+        // Real-time update on pad move!
         proc.requestSpark();
         chordStrip.setChords (proc.chordNames, proc.progressionName);
-        sparkButton.flash();
     };
+
+    // Initial generation
+    proc.requestSpark();
 
     addAndMakeVisible (chordStrip);
     chordStrip.setChords (proc.chordNames, proc.progressionName);
     chordStrip.onStartDragAll = [this] { exportAndDragAllMidi(); };
     chordStrip.onStartDragSingle = [this] (int idx) { exportAndDragSingleMidi (idx); };
+    chordStrip.onClickPreviewChord = [this] (int idx) { previewChordClicked (idx); };
 
     if (auto* c = dynamic_cast<juce::AudioParameterChoice*> (proc.apvts.getParameter ("key")))
         keyBox.addItemList (c->choices, 1);
@@ -91,6 +91,12 @@ void VibeSparkAudioProcessorEditor::exportAndDragSingleMidi (int index)
     }
 }
 
+void VibeSparkAudioProcessorEditor::previewChordClicked (int index)
+{
+    juce::MidiBuffer dummyMidi;
+    proc.previewChord (index, dummyMidi);
+}
+
 void VibeSparkAudioProcessorEditor::timerCallback()
 {
     const double newBpm = proc.hostBpm.load();
@@ -102,10 +108,8 @@ void VibeSparkAudioProcessorEditor::timerCallback()
 
     const float vx = *proc.apvts.getRawParameterValue ("vibeX");
     accent = ui::cold.interpolatedWith (ui::warm, vx);
-    sparkButton.setAccent (accent);
     chordStrip.setAccent (accent);
     chordStrip.setActive (proc.currentBar.load());
-    sparkButton.tick();
     if (changed) repaint (bpmArea);
 }
 
@@ -117,17 +121,14 @@ void VibeSparkAudioProcessorEditor::resized()
     titleArea = header;
     r.removeFromTop (8);
 
-    auto mid = r.removeFromTop (260);
-    padArea = mid.removeFromLeft (380);
-    sparkArea = mid;
-
+    // Full width XY Pad!
+    padArea = r.removeFromTop (230);
     r.removeFromTop (12);
     chordStrip.setBounds (r.removeFromTop (90));
     r.removeFromTop (12);
     footerArea = r;
 
     vibePad.setBounds (padArea);
-    sparkButton.setBounds (sparkArea.withSizeKeepingCentre (180, 180));
 
     auto f = footerArea.withSizeKeepingCentre (footerArea.getWidth(), 30);
     keyBox.setBounds (f.removeFromLeft (160));

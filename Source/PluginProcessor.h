@@ -92,6 +92,7 @@ public:
     void setStateInformation (const void*, int) override;
 
     void requestSpark();
+    void previewChord (int chordIndex, juce::MidiBuffer& midiOut);
     vs::Progression getCurrentProgression() const { return active; }
 
     juce::AudioProcessorValueTreeState apvts;
@@ -136,6 +137,7 @@ private:
     bool cycleActive = false, haveCycle = false, startedInTransport = false, wasPlaying = false;
     juce::int64 nextCycleStart = 0, lastCycleStart = 0, lastCycleLen = 1;
     double uiBeat = 0.0;
+    double lastTransportPpq = -1.0;
 
     std::atomic<float>* vibeXParam = nullptr;
     std::atomic<float>* vibeYParam = nullptr;

@@ -105,26 +105,19 @@ struct ProgTemplate
     const char* name;
     float temp;
     int minChords;
-    bool allowSilence; // Empathetic breathing / pockets
+    bool allowSilence;
     std::array<Step, 4> s;
 };
 
 inline const std::vector<ProgTemplate>& library()
 {
     static const std::vector<ProgTemplate> lib = {
-        // --- ZONE 1: ETHEREAL VOID (Cold + Cinematic) ---
         { "Ethereal Drift",     0.10f, 3, true,  {{ {0,Min11}, {8,Maj7s11}, {3,Sus4},    {0,Min11}   }} },
         { "Deep Space Vibe",    0.20f, 3, true,  {{ {0,Min9},  {1,Maj7},    {10,Dom9},   {0,Min9}    }} },
-
-        // --- ZONE 2: GOLDEN HOUR HEARTBREAK (Warm + Cinematic) ---
         { "Golden Hour R&B",    0.80f, 4, false, {{ {0,Min9},  {3,Maj9},    {8,Maj7},    {5,Min6}    }} },
         { "Neo-Soul Elegance",  0.90f, 4, false, {{ {0,Maj13}, {5,Dom9},    {3,Maj9},    {8,Maj7s11} }} },
-
-        // --- ZONE 3: LATE NIGHT DRIVE (Warm + Intimate) ---
         { "Velvet Drive",       0.70f, 2, true,  {{ {0,Min9},  {5,Min9},    {0,Min9},    {5,Min9}    }} },
         { "Sunday Butter",      0.85f, 3, true,  {{ {0,Maj9},  {4,Min9},    {9,Min11},   {0,Maj9}    }} },
-
-        // --- ZONE 4: 2AM CONFESSION (Cold + Intimate) ---
         { "2AM Floating",       0.05f, 2, true,  {{ {0,Min9},  {8,Maj9},    {0,Min9},    {8,Maj9}    }} },
         { "Late Night Call",    0.40f, 3, true,  {{ {0,Min9},  {5,Dom9},    {8,Maj9},    {0,Min9}    }} }
     };
@@ -163,7 +156,6 @@ public:
         for (size_t i = 0; i < lib.size(); ++i)
         {
             const double dx = (double) vibeX - (double) lib[i].temp;
-            // Match templates based on emotional distance across XY coordinates
             w[i] = std::exp (-dx * dx / (2.0 * 0.25 * 0.25)) + 0.01;
             if ((int) i == lastProgression) w[i] *= 0.1;
             total += w[i];
@@ -206,7 +198,6 @@ public:
         const double barDuration = (4.0 * bpb) / (double) numChords;
         for (int i = 0; i < numChords; ++i)
         {
-            // Empathetic silence / pocket: skip playing chord on the last bar if allowed
             if (allowSilence && vibeY < 0.35f && i == numChords - 1 && numChords > 2) continue;
 
             const auto& v = vo[(size_t) i];
@@ -221,7 +212,6 @@ public:
                 if (j == 0) vel -= 8;
                 vel = juce::jlimit (1, 127, vel);
 
-                // Humanized strumming based on vertical intimacy axis
                 const float strum = (float) j * (1.5f + (1.0f - vibeY) * 3.5f);
                 out.add (chordStart, strum, note, vel, true);
                 out.add (chordEnd - 0.1, -2.0f, note, 0, false);

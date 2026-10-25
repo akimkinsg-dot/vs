@@ -47,7 +47,6 @@ public:
     }
 };
 
-// --- EMPATHETIC XY VIBE PAD WITH 4 CORNER PSYCHOLOGY SCENARIOS ---
 class XYVibePad : public juce::Component
 {
 public:
@@ -84,25 +83,23 @@ public:
         g.drawHorizontalLine ((int) (r.getHeight() * 0.5f), 0.0f, r.getWidth());
         g.drawVerticalLine ((int) (r.getWidth() * 0.5f), 0.0f, r.getHeight());
 
-        // 4 Psychological Corner Scenarios
-        g.setFont (ui::font (10.0f));
+        g.setFont (ui::font (11.0f));
         g.setColour (ui::cold);
-        g.drawText ("2AM CONFESSION", r.reduced (12.0f), juce::Justification::bottomLeft);
+        g.drawText ("2AM CONFESSION", r.reduced (14.0f), juce::Justification::bottomLeft);
         g.setColour (ui::warm);
-        g.drawText ("LATE NIGHT DRIVE", r.reduced (12.0f), juce::Justification::bottomRight);
+        g.drawText ("LATE NIGHT DRIVE", r.reduced (14.0f), juce::Justification::bottomRight);
         g.setColour (ui::text.withAlpha (0.7f));
-        g.drawText ("GOLDEN HOUR HEARTBREAK", r.reduced (12.0f), juce::Justification::topRight);
-        g.drawText ("ETHEREAL VOID", r.reduced (12.0f), juce::Justification::topLeft);
+        g.drawText ("GOLDEN HOUR HEARTBREAK", r.reduced (14.0f), juce::Justification::topRight);
+        g.drawText ("ETHEREAL VOID", r.reduced (14.0f), juce::Justification::topLeft);
 
-        // Dynamic active state label in center if hovering/moving
         const float px = padX * r.getWidth();
         const float py = (1.0f - padY) * r.getHeight();
-        auto dotArea = juce::Rectangle<float> (24.0f, 24.0f).withCentre ({ px, py });
+        auto dotArea = juce::Rectangle<float> (26.0f, 26.0f).withCentre ({ px, py });
 
-        juce::ColourGradient halo (currentAccent.withAlpha (0.55f), px, py,
-                                   currentAccent.withAlpha (0.0f), px + 30.0f, py, true);
+        juce::ColourGradient halo (currentAccent.withAlpha (0.6f), px, py,
+                                   currentAccent.withAlpha (0.0f), px + 35.0f, py, true);
         g.setGradientFill (halo);
-        g.fillEllipse (dotArea.expanded (14.0f));
+        g.fillEllipse (dotArea.expanded (16.0f));
 
         g.setColour (ui::text);
         g.fillEllipse (dotArea);
@@ -123,64 +120,12 @@ private:
     float padX = 0.5f, padY = 0.5f;
 };
 
-class SparkButton : public juce::Button
-{
-public:
-    SparkButton() : juce::Button ("SPARK") { setTriggeredOnMouseDown (true); }
-
-    void flash() { glow = 1.0f; repaint(); }
-    void tick()  { if (glow > 0.01f) { glow *= 0.90f; repaint(); } else glow = 0.0f; }
-    void setAccent (juce::Colour c) { if (c != accent) { accent = c; repaint(); } }
-
-    void paintButton (juce::Graphics& g, bool over, bool down) override
-    {
-        auto area = getLocalBounds().toFloat();
-        const float d = juce::jmin (area.getWidth(), area.getHeight());
-        auto disc = area.withSizeKeepingCentre (d * 0.78f, d * 0.78f);
-        if (down) disc = disc.reduced (d * 0.015f);
-        const auto c = disc.getCentre();
-
-        juce::ColourGradient halo (accent.withAlpha (0.18f + 0.55f * glow + (over ? 0.08f : 0.0f)), c,
-                                   accent.withAlpha (0.0f), c.translated (d * 0.5f, 0.0f), true);
-        g.setGradientFill (halo);
-        g.fillEllipse (area);
-
-        juce::ColourGradient body (juce::Colour (0xff1e2132), disc.getX(), disc.getY(),
-                                   juce::Colour (0xff0d0e16), disc.getX(), disc.getBottom(), false);
-        g.setGradientFill (body);
-        g.fillEllipse (disc);
-        g.setColour (accent.withAlpha (0.55f + 0.45f * glow));
-        g.drawEllipse (disc, 2.5f);
-
-        const float s = disc.getWidth() * 0.075f;
-        const float cx = c.x, cy = c.y - disc.getHeight() * 0.09f;
-        juce::Path bolt;
-        bolt.startNewSubPath (cx + 0.5f * s, cy - 2.0f * s);
-        bolt.lineTo (cx - 1.0f * s, cy + 0.2f * s);
-        bolt.lineTo (cx - 0.1f * s, cy + 0.2f * s);
-        bolt.lineTo (cx - 0.5f * s, cy + 2.0f * s);
-        bolt.lineTo (cx + 1.0f * s, cy - 0.4f * s);
-        bolt.lineTo (cx + 0.1f * s, cy - 0.4f * s);
-        bolt.closeSubPath();
-        g.setColour (accent.brighter (0.3f + 0.4f * glow));
-        g.fillPath (bolt);
-
-        g.setColour (ui::text);
-        g.setFont (juce::Font (juce::FontOptions (15.0f, juce::Font::bold).withKerningFactor (0.3f)));
-        g.drawText ("SPARK", disc.withTrimmedTop (disc.getHeight() * 0.64f).toNearestInt(),
-                    juce::Justification::centredTop);
-    }
-
-private:
-    float glow = 0.0f;
-    juce::Colour accent { ui::violet };
-};
-
 class ChordStrip : public juce::Component
 {
 public:
     std::function<void()> onStartDragAll;
     std::function<void(int)> onStartDragSingle;
+    std::function<void(int)> onClickPreviewChord;
 
     void setChords (const juce::StringArray& names, const juce::String& t)
     {
@@ -190,6 +135,17 @@ public:
     void setAccent (juce::Colour c) { if (c != accent) { accent = c; repaint(); } }
 
     void mouseDown (const juce::MouseEvent& e) override
+    {
+        int clickedIdx = getChordIndexAt (e.getMouseDownX());
+        if (clickedIdx >= 0 && clickedIdx < chords.size())
+        {
+            // Click to preview chord sound
+            if (onClickPreviewChord) onClickPreviewChord (clickedIdx);
+            // Also allow drag single if dragged
+        }
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
     {
         int clickedIdx = getChordIndexAt (e.getMouseDownX());
         if (clickedIdx >= 0 && clickedIdx < chords.size())
@@ -207,7 +163,7 @@ public:
         auto r = getLocalBounds().toFloat();
         g.setColour (ui::dim);
         g.setFont (ui::font (10.5f));
-        g.drawText (title.isEmpty() ? juce::String ("PRESS SPARK") : title.toUpperCase() + "  (DRAG CHORD OR ALL)",
+        g.drawText (title.isEmpty() ? juce::String ("MOVE XY PAD TO VIBE") : title.toUpperCase() + "  (CLICK TO PREVIEW, DRAG TO EXPORT)",
                     r.removeFromTop (18.0f).toNearestInt(), juce::Justification::centredLeft);
         r.removeFromTop (4.0f);
 
@@ -218,13 +174,13 @@ public:
         {
             auto tile = juce::Rectangle<float> (r.getX() + (float) i * (w + gap), r.getY(), w, r.getHeight());
             const bool act = (i == active);
-            g.setColour (act ? accent.withAlpha (0.18f) : ui::panel);
+            g.setColour (act ? accent.withAlpha (0.22f) : ui::panel);
             g.fillRoundedRectangle (tile, 10.0f);
             g.setColour (act ? accent : ui::line);
             g.drawRoundedRectangle (tile.reduced (0.5f), 10.0f, act ? 2.0f : 1.0f);
 
             g.setColour (act ? juce::Colours::white : ui::text);
-            g.setFont (ui::font (18.0f));
+            g.setFont (ui::font (20.0f));
             g.drawText (i < chords.size() ? chords[i] : juce::String ("-"),
                         tile.toNearestInt(), juce::Justification::centred);
             g.setColour (ui::dim);
@@ -269,12 +225,12 @@ private:
     void timerCallback() override;
     void exportAndDragAllMidi();
     void exportAndDragSingleMidi (int index);
+    void previewChordClicked (int index);
 
     VibeSparkAudioProcessor& proc;
     VibeLookAndFeel laf;
 
     XYVibePad vibePad;
-    SparkButton sparkButton;
     ChordStrip chordStrip;
     juce::ComboBox keyBox;
     juce::ToggleButton loopButton { "Loop" }, portButton { "Virtual MIDI port" };
@@ -284,7 +240,7 @@ private:
     std::unique_ptr<CA> keyAtt;
     std::unique_ptr<BA> loopAtt, portAtt;
 
-    juce::Rectangle<int> titleArea, bpmArea, padArea, sparkArea, footerArea;
+    juce::Rectangle<int> titleArea, bpmArea, padArea, footerArea;
     double bpm = 120.0;
     bool playing = false;
     float beat = 0.0f;

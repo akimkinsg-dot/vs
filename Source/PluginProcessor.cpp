@@ -67,6 +67,7 @@ void VibeSparkAudioProcessor::prepareToPlay (double sampleRate, int)
     sounding.fill (false);
     portNotes.fill (false);
     cycleActive = haveCycle = startedInTransport = wasPlaying = false;
+    lastTransportPpq = -1.0;
 }
 
 void VibeSparkAudioProcessor::requestSpark()
@@ -90,6 +91,20 @@ void VibeSparkAudioProcessor::requestSpark()
     }
     chordNames = names;
     progressionName = name;
+}
+
+void VibeSparkAudioProcessor::previewChord (int chordIndex, juce::MidiBuffer& midiOut)
+{
+    if (!haveActive) return;
+    auto seq = active.singleChordToMidiSequence (chordIndex, hostBeatsPerBar.load());
+    for (int i = 0; i < seq.getNumEvents(); ++i)
+    {
+        auto* ev = seq.getEventPointer (i);
+        if (ev != nullptr)
+        {
+            midiOut.addEvent (ev->message, 0);
+        }
+    }
 }
 
 void VibeSparkAudioProcessor::pushEvent (juce::int64 pos, int status, int d1, int d2)
@@ -190,8 +205,17 @@ void VibeSparkAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     }
     midi.clear();
 
-    const bool risingEdge = ! wasPlaying && playing;
-    if (wasPlaying && ! playing && startedInTransport)
+    // Reset when transport starts from 0 or restarts
+    bool transportRestarted = false;
+    if (playing && havePpq)
+    {
+        if (!wasPlaying || ppq < lastTransportPpq || ppq < 0.1)
+            transportRestarted = true;
+        lastTransportPpq = ppq;
+    }
+
+    const bool risingEdge = !wasPlaying && playing;
+    if (wasPlaying && !playing && startedInTransport)
     {
         flushAll (blockStart);
         cycleActive = haveCycle = startedInTransport = false;
@@ -209,8 +233,12 @@ void VibeSparkAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
             newProgression = true;
         }
     }
-    if (newProgression || (risingEdge && loopOn && haveActive))
-        beginCycle (blockStart, playing, havePpq, ppq, lastBar, bpb, bpm);
+
+    if (newProgression || risingEdge || transportRestarted)
+    {
+        if (haveActive)
+            beginCycle (blockStart, playing, havePpq, ppq, lastBar, bpb, bpm);
+    }
 
     const double spb = 60.0 / bpm * sr;
     const juce::int64 cycleLen = (juce::int64) std::llround (active.lengthBeats * spb);
