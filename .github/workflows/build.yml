@@ -1,0 +1,33 @@
+name: Build VibeSpark (macOS arm64)
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_ARCHITECTURES=arm64
+          -DVIBESPARK_LIVE_MODE=ON
+          -DVIBESPARK_COPY_AFTER_BUILD=OFF
+
+      - name: Build
+        run: cmake --build build --config Release -j 4
+
+      - name: Ad-hoc sign and zip
+        run: |
+          VST3=build/VibeSpark_artefacts/Release/VST3/VibeSpark.vst3
+          codesign --force --deep -s - "$VST3"
+          ditto -c -k --keepParent "$VST3" VibeSpark-VST3-macOS-arm64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VibeSpark-VST3-macOS-arm64
+          path: VibeSpark-VST3-macOS-arm64.zip
