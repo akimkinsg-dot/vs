@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.22)
 set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Native Apple Silicon build")
 set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "")
 
-project(VibeSpark VERSION 0.5.0 LANGUAGES C CXX)
+project(VibeSpark VERSION 0.8.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -24,7 +24,6 @@ if(VIBESPARK_LIVE_MODE)
     set(VS_VST3_CAT "Instrument Synth")
 else()
     set(VS_IS_SYNTH FALSE)
-    set(VS_IS_MIDI_FX TRUE)
     set(VS_VST3_CAT "Fx")
 endif()
 

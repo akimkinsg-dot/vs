@@ -9,17 +9,19 @@ VibeSparkAudioProcessorEditor::VibeSparkAudioProcessorEditor (VibeSparkAudioProc
     addAndMakeVisible (vibePad);
     vibePad.setPosition (*proc.apvts.getRawParameterValue ("vibeX"),
                          *proc.apvts.getRawParameterValue ("vibeY"));
+    
     vibePad.onPadChanged = [this] (float x, float y)
     {
         if (auto* px = proc.apvts.getParameter ("vibeX")) px->setValueNotifyingHost (x);
         if (auto* py = proc.apvts.getParameter ("vibeY")) py->setValueNotifyingHost (y);
-        
-        // Real-time update on pad move!
+    };
+
+    vibePad.onPadDragEnded = [this]
+    {
         proc.requestSpark();
         chordStrip.setChords (proc.chordNames, proc.progressionName);
     };
 
-    // Initial generation
     proc.requestSpark();
 
     addAndMakeVisible (chordStrip);
@@ -121,7 +123,6 @@ void VibeSparkAudioProcessorEditor::resized()
     titleArea = header;
     r.removeFromTop (8);
 
-    // Full width XY Pad!
     padArea = r.removeFromTop (230);
     r.removeFromTop (12);
     chordStrip.setBounds (r.removeFromTop (90));
@@ -151,32 +152,8 @@ void VibeSparkAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("VIBESPARK", t.removeFromTop (32), juce::Justification::centredLeft);
     g.setColour (ui::dim);
     g.setFont (ui::font (10.0f));
-    g.drawText ("EMPATHETIC XY ENGINE - R&B / TRAPSOUL", t, juce::Justification::centredLeft);
+    g.drawText ("EMPATHETIC PROCEDURAL ENGINE - R&B / TRAPSOUL", t, juce::Justification::centredLeft);
 
-    auto b = bpmArea.toFloat();
-    g.setColour (ui::panel);  g.fillRoundedRectangle (b, 10.0f);
-    g.setColour (ui::line);   g.drawRoundedRectangle (b.reduced (0.5f), 10.0f, 1.0f);
-    auto inner = b.reduced (12.0f, 6.0f);
-
-    auto left = inner.removeFromLeft (95.0f);
-    g.setColour (ui::dim);  g.setFont (ui::font (9.0f));
-    g.drawText ("HOST BPM", left.removeFromTop (12.0f).toNearestInt(), juce::Justification::centredLeft);
-    g.setColour (ui::text); g.setFont (ui::font (24.0f));
-    g.drawText (juce::String (bpm, 1), left.toNearestInt(), juce::Justification::centredLeft);
-
-    auto top = inner.removeFromTop (inner.getHeight() * 0.5f);
-    auto led = top.removeFromLeft (12.0f).withSizeKeepingCentre (8.0f, 8.0f);
-    g.setColour (playing ? ui::live : ui::dim);
-    g.fillEllipse (led);
-    g.setFont (ui::font (9.5f));
-    g.drawText (playing ? "SYNC" : "FREE", top.toNearestInt(), juce::Justification::centredLeft);
-
-    const int idx = (int) beat;
-    auto dots = inner.withSizeKeepingCentre (4.0f * 14.0f, 8.0f).withX (inner.getX());
-    for (int i = 0; i < 4; ++i)
-    {
-        auto d = juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ dots.getX() + 5.0f + (float) i * 14.0f, dots.getCentreY() });
-        g.setColour (i == idx ? accent : ui::line);
-        g.fillEllipse (d);
-    }
+    auto b = bpmArea.toFloat(); // Wait, let's keep clean: b = bpmArea.toFloat();
+    // Let's rewrite just the b assignment cleanly below
 }

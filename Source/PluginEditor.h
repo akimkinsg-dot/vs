@@ -51,6 +51,7 @@ class XYVibePad : public juce::Component
 {
 public:
     std::function<void(float, float)> onPadChanged;
+    std::function<void()> onPadDragEnded;
 
     void setPosition (float x, float y)
     {
@@ -64,6 +65,10 @@ public:
 
     void mouseDown (const juce::MouseEvent& e) override { updateFromMouse (e); }
     void mouseDrag (const juce::MouseEvent& e) override { updateFromMouse (e); }
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (onPadDragEnded) onPadDragEnded();
+    }
 
     void paint (juce::Graphics& g) override
     {
@@ -139,9 +144,7 @@ public:
         int clickedIdx = getChordIndexAt (e.getMouseDownX());
         if (clickedIdx >= 0 && clickedIdx < chords.size())
         {
-            // Click to preview chord sound
             if (onClickPreviewChord) onClickPreviewChord (clickedIdx);
-            // Also allow drag single if dragged
         }
     }
 

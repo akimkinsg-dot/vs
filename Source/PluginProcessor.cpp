@@ -147,16 +147,23 @@ void VibeSparkAudioProcessor::flushAll (juce::int64 at)
 void VibeSparkAudioProcessor::beginCycle (juce::int64 blockStart, bool playing, bool havePpq, double ppq,
                                           double lastBarPpq, double bpb, double bpm)
 {
+    // FIX: Phase alignment relative to the song timeline (PPQ position).
+    // Instead of forcing playback to always restart from bar 0 of the cycle,
+    // we calculate where the playhead currently is within the progression loop 
+    // so it picks up seamlessly from the exact timeline position!
     double offsetSamples = 0.0;
-    if (playing && havePpq)
+    if (playing && havePpq && active.lengthBeats > 0.0)
     {
-        double nextBar = lastBarPpq;
-        while (nextBar < ppq - 1.0e-3) nextBar += bpb;
-        offsetSamples = (nextBar - ppq) * 60.0 / bpm * currentSampleRate;
+        const double totalCycleBeats = active.lengthBeats;
+        // Position in beats from timeline start (or use modulo relative to song structure)
+        double currentProgBeat = std::fmod (ppq, totalCycleBeats);
+        offsetSamples = -currentProgBeat * 60.0 / bpm * currentSampleRate;
         startedInTransport = true;
     }
     else
+    {
         startedInTransport = false;
+    }
 
     const juce::int64 start = blockStart + (juce::int64) std::llround (offsetSamples);
     killAfter (start);
@@ -205,7 +212,6 @@ void VibeSparkAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     }
     midi.clear();
 
-    // Reset when transport starts from 0 or restarts
     bool transportRestarted = false;
     if (playing && havePpq)
     {
