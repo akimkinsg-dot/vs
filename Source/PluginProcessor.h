@@ -7,9 +7,6 @@
 #include <memory>
 #include <vector>
 
-//==============================================================================
-// Sends MIDI to a virtual CoreMIDI port called "VibeSpark" from a helper thread,
-// so the audio thread only writes into a lock-free FIFO.
 class MidiPortSender : private juce::Thread
 {
 public:
@@ -65,7 +62,6 @@ private:
     std::array<Item, 1024> items {};
 };
 
-//==============================================================================
 class VibeSparkAudioProcessor : public juce::AudioProcessor
 {
 public:
@@ -95,20 +91,17 @@ public:
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
 
-    //--------------------------------------------------------------------------
-    // Called from the GUI (message thread)
     void requestSpark();
+    vs::Progression getCurrentProgression() const { return active; }
 
     juce::AudioProcessorValueTreeState apvts;
 
-    // Read by the editor (written by the audio thread)
     std::atomic<double> hostBpm { 120.0 };
     std::atomic<double> hostBeatsPerBar { 4.0 };
     std::atomic<bool>   hostPlaying { false };
     std::atomic<float>  beatInBar { 0.0f };
     std::atomic<int>    currentBar { -1 };
 
-    // Message-thread only (set by requestSpark, read by the editor)
     juce::StringArray chordNames;
     juce::String progressionName;
 
@@ -124,16 +117,13 @@ private:
     void beginCycle (juce::int64 blockStart, bool playing, bool havePpq, double ppq,
                      double lastBarPpq, double bpb, double bpm);
 
-    // message thread
     vs::ChordEngine engine;
     std::atomic<int> lastInputPc { -1 };
 
-    // handoff message thread -> audio thread
     juce::SpinLock handoffLock;
     vs::Progression handoff;
     bool handoffReady = false;
 
-    // audio thread state
     vs::Progression active;
     bool haveActive = false;
     std::vector<Pending> queue;

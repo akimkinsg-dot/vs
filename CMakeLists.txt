@@ -1,21 +1,20 @@
 cmake_minimum_required(VERSION 3.22)
 
-# Must be set BEFORE project()
-set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Use 'arm64;x86_64' for a universal build")
+set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Native Apple Silicon build")
 set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "")
 
-project(VibeSpark VERSION 0.1.0 LANGUAGES C CXX)
+project(VibeSpark VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-option(VIBESPARK_LIVE_MODE "Instrument-type plugin with silent audio out (best for Ableton Live). OFF = pure MIDI effect" ON)
+option(VIBESPARK_LIVE_MODE "Instrument-type plugin with silent audio out for Ableton Live" ON)
 option(VIBESPARK_COPY_AFTER_BUILD "Copy VST3 to ~/Library/Audio/Plug-Ins/VST3 after build" ON)
 
 include(FetchContent)
 FetchContent_Declare(JUCE
     GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-    GIT_TAG        8.0.6      # bump to the latest 8.x tag if you like
+    GIT_TAG        8.0.6
     GIT_SHALLOW    TRUE)
 FetchContent_MakeAvailable(JUCE)
 
@@ -57,7 +56,7 @@ target_compile_definitions(VibeSpark PUBLIC
 
 target_link_libraries(VibeSpark
     PRIVATE
-        juce::juce_audio_utils      # pulls in processors, devices (MidiOutput), gui
+        juce::juce_audio_utils
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags

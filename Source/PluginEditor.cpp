@@ -28,6 +28,7 @@ VibeSparkAudioProcessorEditor::VibeSparkAudioProcessorEditor (VibeSparkAudioProc
 
     addAndMakeVisible (chordStrip);
     chordStrip.setChords (proc.chordNames, proc.progressionName);
+    chordStrip.onStartDrag = [this] { exportAndDragMidi(); };
 
     if (auto* c = dynamic_cast<juce::AudioParameterChoice*> (proc.apvts.getParameter ("key")))
         keyBox.addItemList (c->choices, 1);
@@ -48,6 +49,28 @@ VibeSparkAudioProcessorEditor::~VibeSparkAudioProcessorEditor()
 {
     stopTimer();
     setLookAndFeel (nullptr);
+}
+
+void VibeSparkAudioProcessorEditor::exportAndDragMidi()
+{
+    auto prog = proc.getCurrentProgression();
+    if (prog.n == 0) return;
+
+    juce::MidiFile file;
+    file.setTicksPerQuarterNote (960);
+    file.addTrack (prog.toMidiSequence (proc.hostBeatsPerBar.load()));
+
+    juce::File tempDir = juce::File::getSpecialLocation (juce::File::tempDirectory);
+    juce::File tempMidi = tempDir.getChildFile ("VibeSpark_Chords.mid");
+    tempMidi.deleteFile();
+
+    juce::FileOutputStream stream (tempMidi);
+    if (stream.openedOk())
+    {
+        file.writeTo (stream);
+        stream.flush();
+        juce::DragAndDropContainer::performExternalDragDropOfFiles ({ tempMidi.getFullPathName() }, false, this);
+    }
 }
 
 void VibeSparkAudioProcessorEditor::timerCallback()
@@ -104,16 +127,14 @@ void VibeSparkAudioProcessorEditor::paint (juce::Graphics& g)
     g.setGradientFill (wash);
     g.fillAll();
 
-    // title
     auto t = titleArea;
     g.setColour (ui::text);
     g.setFont (juce::Font (juce::FontOptions (24.0f, juce::Font::bold).withKerningFactor (0.28f)));
     g.drawText ("VIBESPARK", t.removeFromTop (34), juce::Justification::centredLeft);
     g.setColour (ui::dim);
     g.setFont (ui::font (10.5f));
-    g.drawText ("MIDI CHORD ENGINE  -  R&B / TRAPSOUL", t, juce::Justification::centredLeft);
+    g.drawText ("MIDI CHORD ENGINE - R&B / TRAPSOUL", t, juce::Justification::centredLeft);
 
-    // BPM / sync indicator
     auto b = bpmArea.toFloat();
     g.setColour (ui::panel);  g.fillRoundedRectangle (b, 12.0f);
     g.setColour (ui::line);   g.drawRoundedRectangle (b.reduced (0.5f), 12.0f, 1.0f);
@@ -141,21 +162,18 @@ void VibeSparkAudioProcessorEditor::paint (juce::Graphics& g)
         g.fillEllipse (d);
     }
 
-    // knob captions
     auto cap = knobArea.withTrimmedTop (knobArea.getHeight() - 24);
     g.setFont (ui::font (10.5f));
     g.setColour (ui::cold); g.drawText ("COLD", cap, juce::Justification::centredLeft);
     g.setColour (ui::warm); g.drawText ("WARM", cap, juce::Justification::centredRight);
     g.setColour (ui::dim);  g.drawText ("VIBE", cap, juce::Justification::centred);
 
-    // space captions
     g.setColour (ui::dim);
     g.drawText ("SPACE", spaceArea.withHeight (20), juce::Justification::centred);
     g.setFont (ui::font (9.5f));
     g.drawText ("WIDE",  spaceArea.withTrimmedTop (22).withHeight (14), juce::Justification::centred);
     g.drawText ("TIGHT", spaceArea.withTrimmedTop (spaceArea.getHeight() - 16), juce::Justification::centred);
 
-    // hint below SPARK
     g.setFont (ui::font (10.0f, false));
     g.drawText (playing ? "lands on the next bar" : "transport stopped: plays instantly",
                 sparkArea.withTrimmedTop (sparkArea.getHeight() - 18), juce::Justification::centred);

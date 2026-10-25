@@ -19,7 +19,6 @@ namespace ui
     }
 }
 
-//==============================================================================
 class VibeLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
@@ -97,7 +96,6 @@ public:
     }
 };
 
-//==============================================================================
 class SparkButton : public juce::Button
 {
 public:
@@ -127,7 +125,6 @@ public:
         g.setColour (accent.withAlpha (0.55f + 0.45f * glow));
         g.drawEllipse (disc, 2.5f);
 
-        // lightning bolt
         const float s = disc.getWidth() * 0.075f;
         const float cx = c.x, cy = c.y - disc.getHeight() * 0.09f;
         juce::Path bolt;
@@ -152,10 +149,11 @@ private:
     juce::Colour accent { ui::violet };
 };
 
-//==============================================================================
 class ChordStrip : public juce::Component
 {
 public:
+    std::function<void()> onStartDrag;
+
     void setChords (const juce::StringArray& names, const juce::String& t)
     {
         chords = names; title = t; repaint();
@@ -163,12 +161,17 @@ public:
     void setActive (int i) { if (i != active) { active = i; repaint(); } }
     void setAccent (juce::Colour c) { if (c != accent) { accent = c; repaint(); } }
 
+    void mouseDown (const juce::MouseEvent&) override
+    {
+        if (onStartDrag) onStartDrag();
+    }
+
     void paint (juce::Graphics& g) override
     {
         auto r = getLocalBounds().toFloat();
         g.setColour (ui::dim);
         g.setFont (ui::font (10.5f));
-        g.drawText (title.isEmpty() ? juce::String ("PRESS SPARK") : title.toUpperCase(),
+        g.drawText (title.isEmpty() ? juce::String ("PRESS SPARK") : title.toUpperCase() + "  (DRAG MIDI)",
                     r.removeFromTop (18.0f).toNearestInt(), juce::Justification::centredLeft);
         r.removeFromTop (4.0f);
 
@@ -184,12 +187,12 @@ public:
             g.drawRoundedRectangle (tile.reduced (0.5f), 10.0f, act ? 2.0f : 1.0f);
 
             g.setColour (act ? juce::Colours::white : ui::text);
-            g.setFont (ui::font (22.0f));
+            g.setFont (ui::font (20.0f));
             g.drawText (i < chords.size() ? chords[i] : juce::String ("-"),
                         tile.toNearestInt(), juce::Justification::centred);
             g.setColour (ui::dim);
-            g.setFont (ui::font (9.5f));
-            g.drawText ("BAR " + juce::String (i + 1), tile.reduced (10.0f, 6.0f).toNearestInt(),
+            g.setFont (ui::font (9.0f));
+            g.drawText ("BAR " + juce::String (i + 1), tile.reduced (8.0f, 6.0f).toNearestInt(),
                         juce::Justification::topLeft);
         }
     }
@@ -201,7 +204,6 @@ private:
     juce::Colour accent { ui::violet };
 };
 
-//==============================================================================
 class VibeSparkAudioProcessorEditor : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
@@ -213,6 +215,7 @@ public:
 
 private:
     void timerCallback() override;
+    void exportAndDragMidi();
 
     VibeSparkAudioProcessor& proc;
     VibeLookAndFeel laf;

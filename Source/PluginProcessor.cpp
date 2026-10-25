@@ -1,7 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-//==============================================================================
 juce::AudioProcessorValueTreeState::ParameterLayout VibeSparkAudioProcessor::createLayout()
 {
     using namespace juce;
@@ -70,8 +69,6 @@ void VibeSparkAudioProcessor::prepareToPlay (double sampleRate, int)
     cycleActive = haveCycle = startedInTransport = wasPlaying = false;
 }
 
-//==============================================================================
-// GUI thread: generate a progression and hand it over (no allocation on the audio thread)
 void VibeSparkAudioProcessor::requestSpark()
 {
     const int keySel = (int) keyParam->load();
@@ -95,7 +92,6 @@ void VibeSparkAudioProcessor::requestSpark()
     progressionName = name;
 }
 
-//==============================================================================
 void VibeSparkAudioProcessor::pushEvent (juce::int64 pos, int status, int d1, int d2)
 {
     queue.push_back (Pending { pos, seqCounter++, (juce::uint8) status, (juce::uint8) d1, (juce::uint8) d2 });
@@ -110,7 +106,6 @@ void VibeSparkAudioProcessor::sortQueue()
     queueDirty = false;
 }
 
-// Remove everything scheduled at/after `start` and close any note that would still be sounding then.
 void VibeSparkAudioProcessor::killAfter (juce::int64 start)
 {
     sortQueue();
@@ -140,13 +135,13 @@ void VibeSparkAudioProcessor::beginCycle (juce::int64 blockStart, bool playing, 
     double offsetSamples = 0.0;
     if (playing && havePpq)
     {
-        double nextBar = lastBarPpq;                       // quantise to the next bar line
+        double nextBar = lastBarPpq;
         while (nextBar < ppq - 1.0e-3) nextBar += bpb;
         offsetSamples = (nextBar - ppq) * 60.0 / bpm * currentSampleRate;
         startedInTransport = true;
     }
     else
-        startedInTransport = false;                        // transport stopped: start right now
+        startedInTransport = false;
 
     const juce::int64 start = blockStart + (juce::int64) std::llround (offsetSamples);
     killAfter (start);
@@ -154,11 +149,10 @@ void VibeSparkAudioProcessor::beginCycle (juce::int64 blockStart, bool playing, 
     cycleActive = true;
 }
 
-//==============================================================================
 void VibeSparkAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
-    buffer.clear();                                        // silent audio (instrument mode)
+    buffer.clear();
 
     const int numSamples = buffer.getNumSamples();
     const double sr = currentSampleRate;
@@ -168,7 +162,6 @@ void VibeSparkAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     const double blockMs = 1000.0 * numSamples / sr;
     const bool loopOn = loopParam->load() > 0.5f;
 
-    // ---- host transport -------------------------------------------------------
     double bpm = hostBpm.load();
     double bpb = 4.0, ppq = 0.0, lastBar = 0.0;
     bool playing = false, havePpq = false;
@@ -190,24 +183,21 @@ void VibeSparkAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     hostBeatsPerBar.store (bpb);
     hostPlaying.store (playing);
 
-    // ---- incoming MIDI: remember the last note (used by Key = "Last MIDI Note") ----
     for (const auto meta : midi)
     {
         const auto m = meta.getMessage();
         if (m.isNoteOn()) lastInputPc.store (m.getNoteNumber() % 12);
     }
-    midi.clear();                                          // we output generated MIDI only
+    midi.clear();
 
-    // ---- transport edges ---------------------------------------------------------
     const bool risingEdge = ! wasPlaying && playing;
     if (wasPlaying && ! playing && startedInTransport)
     {
-        flushAll (blockStart);                             // host stopped: release everything
+        flushAll (blockStart);
         cycleActive = haveCycle = startedInTransport = false;
     }
     wasPlaying = playing;
 
-    // ---- new progression from the GUI ---------------------------------------------
     bool newProgression = false;
     {
         const juce::SpinLock::ScopedTryLockType lock (handoffLock);
@@ -222,8 +212,7 @@ void VibeSparkAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     if (newProgression || (risingEdge && loopOn && haveActive))
         beginCycle (blockStart, playing, havePpq, ppq, lastBar, bpb, bpm);
 
-    // ---- schedule cycle(s) that begin inside this block ----------------------------
-    const double spb = 60.0 / bpm * sr;                    // samples per beat
+    const double spb = 60.0 / bpm * sr;
     const juce::int64 cycleLen = (juce::int64) std::llround (active.lengthBeats * spb);
     while (cycleActive && nextCycleStart < blockEnd)
     {
@@ -241,7 +230,6 @@ void VibeSparkAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         if (! loopOn) cycleActive = false;
     }
 
-    // ---- emit due events (host MIDI buffer + virtual port) ----------------------------
     sortQueue();
     const bool portOn = portParam->load() > 0.5f && portSender->isActive();
     size_t keep = 0;
@@ -263,7 +251,7 @@ void VibeSparkAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     }
     queue.erase (queue.begin() + (long) keep, queue.end());
 
-    if (! portOn && portSender->isActive())                // port switched off: release its notes
+    if (! portOn && portSender->isActive())
         for (int n = 0; n < 128; ++n)
             if (portNotes[(size_t) n])
             {
@@ -271,7 +259,6 @@ void VibeSparkAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
                 portNotes[(size_t) n] = false;
             }
 
-    // ---- UI feedback ----------------------------------------------------------------------
     if (playing && havePpq) uiBeat = std::max (0.0, ppq - lastBar);
     else                    uiBeat = std::fmod (uiBeat + numSamples / spb, bpb);
     beatInBar.store ((float) uiBeat);
@@ -289,7 +276,6 @@ void VibeSparkAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     samplePos = blockEnd;
 }
 
-//==============================================================================
 juce::AudioProcessorEditor* VibeSparkAudioProcessor::createEditor()
 {
     return new VibeSparkAudioProcessorEditor (*this);
