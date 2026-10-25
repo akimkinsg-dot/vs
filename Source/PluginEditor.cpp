@@ -9,7 +9,8 @@ VibeSparkAudioProcessorEditor::VibeSparkAudioProcessorEditor (VibeSparkAudioProc
     addAndMakeVisible (vibePad);
     vibePad.setPosition (*proc.apvts.getRawParameterValue ("vibeX"),
                          *proc.apvts.getRawParameterValue ("vibeY"));
-    
+    vibePad.setLayerState (proc.currentLayer.load(), proc.activeCorner.load());
+
     vibePad.onPadChanged = [this] (float x, float y)
     {
         if (auto* px = proc.apvts.getParameter ("vibeX")) px->setValueNotifyingHost (x);
@@ -18,8 +19,9 @@ VibeSparkAudioProcessorEditor::VibeSparkAudioProcessorEditor (VibeSparkAudioProc
 
     vibePad.onPadDragEnded = [this]
     {
-        proc.requestSpark();
-        chordStrip.setChords (proc.chordNames, proc.progressionName);
+        float x = *proc.apvts.getRawParameterValue ("vibeX");
+        float y = *proc.apvts.getRawParameterValue ("vibeY");
+        handlePadRelease (x, y);
     };
 
     proc.requestSpark();
@@ -47,6 +49,56 @@ VibeSparkAudioProcessorEditor::~VibeSparkAudioProcessorEditor()
 {
     stopTimer();
     setLookAndFeel (nullptr);
+}
+
+void VibeSparkAudioProcessorEditor::handlePadRelease (float x, float y)
+{
+    int currentL = proc.currentLayer.load();
+    int activeC = proc.activeCorner.load();
+
+    if (currentL == 0)
+    {
+        // Check if pulled into one of the 4 corners (threshold > 0.85 or < 0.15)
+        bool isTL = (x < 0.2f && y > 0.8f);
+        bool isTR = (x > 0.8f && y > 0.8f);
+        bool isBL = (x < 0.2f && y < 0.2f);
+        bool isBR = (x > 0.8f && y < 0.2f);
+
+        if (isTL || isTR || isBL || isBR)
+        {
+            int corner = isTL ? 0 : (isTR ? 1 : (isBL ? 2 : 3));
+            proc.currentLayer.store (1);
+            proc.activeCorner.store (corner);
+            // Snap dot back to centre for the sub-layer exploration
+            if (auto* px = proc.apvts.getParameter ("vibeX")) px->setValueNotifyingHost (0.5f);
+            if (auto* py = proc.apvts.getParameter ("vibeY")) py->setValueNotifyingHost (0.5f);
+        }
+    }
+    else
+    {
+        // In sub-layer: check if pulled towards the OPPOSITE direction to zoom out
+        // Corner mapping: 0=TL(X<0.2,Y>0.8 -> opposite is BR), 1=TR(X>0.8,Y>0.8 -> opposite is BL), etc.
+        bool zoomOut = false;
+        if (activeC == 0 && x > 0.8f && y < 0.2f) zoomOut = true; // TL -> pull BR
+        else if (activeC == 1 && x < 0.2f && y < 0.2f) zoomOut = true; // TR -> pull BL
+        else if (activeC == 2 && x > 0.8f && y > 0.8f) zoomOut = true; // BL -> pull TR
+        else if (activeC == 3 && x < 0.2f && y > 0.8f) zoomOut = true; // BR -> pull TL
+
+        if (zoomOut)
+        {
+            proc.currentLayer.store (0);
+            proc.activeCorner.store (-1);
+            if (auto* px = proc.apvts.getParameter ("vibeX")) px->setValueNotifyingHost (0.5f);
+            if (auto* py = proc.apvts.getParameter ("vibeY")) py->setValueNotifyingHost (0.5f);
+        }
+    }
+
+    vibePad.setLayerState (proc.currentLayer.load(), proc.activeCorner.load());
+    vibePad.setPosition (*proc.apvts.getRawParameterValue ("vibeX"),
+                         *proc.apvts.getRawParameterValue ("vibeY"));
+
+    proc.requestSpark();
+    chordStrip.setChords (proc.chordNames, proc.progressionName);
 }
 
 void VibeSparkAudioProcessorEditor::exportAndDragAllMidi()
@@ -152,8 +204,32 @@ void VibeSparkAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("VIBESPARK", t.removeFromTop (32), juce::Justification::centredLeft);
     g.setColour (ui::dim);
     g.setFont (ui::font (10.0f));
-    g.drawText ("EMPATHETIC PROCEDURAL ENGINE - R&B / TRAPSOUL", t, juce::Justification::centredLeft);
+    g.drawText ("MULTI-LAYER PSYCHOLOGICAL VIBE ENGINE", t, juce::Justification::centredLeft);
 
-    auto b = bpmArea.toFloat(); // Wait, let's keep clean: b = bpmArea.toFloat();
-    // Let's rewrite just the b assignment cleanly below
+    auto b = bpmArea.toFloat();
+    g.setColour (ui::panel);  g.fillRoundedRectangle (b, 10.0f);
+    g.setColour (ui::line);   g.drawRoundedRectangle (b.reduced (0.5f), 10.0f, 1.0f);
+    auto inner = b.reduced (12.0f, 6.0f);
+
+    auto left = inner.removeFromLeft (95.0f);
+    g.setColour (ui::dim);  g.setFont (ui::font (9.0f));
+    g.drawText ("HOST BPM", left.removeFromTop (12.0f).toNearestInt(), juce::Justification::centredLeft);
+    g.setColour (ui::text); g.setFont (ui::font (24.0f));
+    g.drawText (juce::String (bpm, 1), left.toNearestInt(), juce::Justification::centredLeft);
+
+    auto top = inner.removeFromTop (inner.getHeight() * 0.5f);
+    auto led = top.removeFromLeft (12.0f).withSizeKeepingCentre (8.0f, 8.0f);
+    g.setColour (playing ? ui::live : ui::dim);
+    g.fillEllipse (led);
+    g.setFont (ui::font (9.5f));
+    g.drawText (playing ? "SYNC" : "FREE", top.toNearestInt(), juce::Justification::centredLeft);
+
+    const int idx = (int) beat;
+    auto dots = inner.withSizeKeepingCentre (4.0f * 14.0f, 8.0f).withX (inner.getX());
+    for (int i = 0; i < 4; ++i)
+    {
+        auto d = juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ dots.getX() + 5.0f + (float) i * 14.0f, dots.getCentreY() });
+        g.setColour (i == idx ? accent : ui::line);
+        g.fillEllipse (d);
+    }
 }

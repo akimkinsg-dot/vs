@@ -106,6 +106,10 @@ public:
     juce::StringArray chordNames;
     juce::String progressionName;
 
+    // Multi-layer zoom state
+    std::atomic<int> currentLayer { 0 }; // 0 = base, 1 = sub-layer
+    std::atomic<int> activeCorner { -1 }; // 0=TL, 1=TR, 2=BL, 3=BR
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 

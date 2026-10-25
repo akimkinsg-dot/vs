@@ -111,117 +111,111 @@ public:
         return n[((pc % 12) + 12) % 12];
     }
 
-    void generate (float vibeX, float vibeY, int keyPc, double bpm, double beatsPerBar,
+    void generate (float vibeX, float vibeY, int layer, int subCorner, int keyPc, double bpm, double beatsPerBar,
                    Progression& out, juce::StringArray& chordNames, juce::String& progName)
+{
+    juce::ignoreUnused (bpm);
+    vibeX = juce::jlimit (0.0f, 1.0f, vibeX);
+    vibeY = juce::jlimit (0.0f, 1.0f, vibeY);
+    keyPc = ((keyPc % 12) + 12) % 12;
+    const double bpb = juce::jlimit (2.0, 8.0, beatsPerBar);
+
+    out = Progression{};
+    out.lengthBeats = 4.0 * bpb;
+    chordNames.clear();
+
+    bool isMinor = (vibeX < 0.5f);
+    std::vector<int> degrees;
+
+    // Layer 2 micro-states based on active corner
+    if (layer == 1)
     {
-        juce::ignoreUnused (bpm);
-        vibeX = juce::jlimit (0.0f, 1.0f, vibeX);
-        vibeY = juce::jlimit (0.0f, 1.0f, vibeY);
-        keyPc = ((keyPc % 12) + 12) % 12;
-        const double bpb = juce::jlimit (2.0, 8.0, beatsPerBar);
-
-        out = Progression{};
-        out.lengthBeats = 4.0 * bpb;
-        chordNames.clear();
-
-        const bool isMinorVibe = (vibeX < 0.5f);
-        std::vector<int> availableDegrees;
-        if (isMinorVibe) {
-            availableDegrees = { 0, 3, 5, 7, 8, 10, 1, 2 };
-        } else {
-            availableDegrees = { 0, 5, 9, 7, 2, 4, 10, 11 };
-        }
-
-        int numChords = 4;
-        if (vibeY < 0.3f && rng.nextBool()) {
-            numChords = 2;
-        } else if (vibeY > 0.7f) {
-            numChords = 4;
-        } else {
-            numChords = rng.nextBool() ? 4 : 3;
-        }
-
-        struct GeneratedStep { int rootSemis; Quality q; };
-        std::vector<GeneratedStep> steps;
-
-        int currentRoot = 0;
-        steps.push_back({ currentRoot, isMinorVibe ? Min9 : Maj9 });
-
-        for (int i = 1; i < numChords; ++i)
+        switch (subCorner)
         {
-            int candidateIdx = rng.nextInt ((int) availableDegrees.size());
-            int nextRoot = availableDegrees[(size_t) candidateIdx];
-            
-            if (nextRoot == steps.back().rootSemis && availableDegrees.size() > 1) {
-                candidateIdx = (candidateIdx + 1) % availableDegrees.size();
-                nextRoot = availableDegrees[(size_t) candidateIdx];
-            }
-
-            Quality q = Min7;
-            if (isMinorVibe)
-            {
-                if (vibeY > 0.6f) q = (i % 2 == 0) ? Min11 : Maj7s11;
-                else              q = (i % 2 == 0) ? Min9 : Dom7sus;
-            }
-            else
-            {
-                if (vibeY > 0.6f) q = (i % 2 == 0) ? Maj13 : Maj7s11;
-                else              q = (i % 2 == 0) ? Maj9 : Dom9;
-            }
-
-            if (!isMinorVibe && i == 2 && vibeX > 0.6f) {
-                nextRoot = 5;
-                q = Min6;
-            }
-
-            steps.push_back({ nextRoot, q });
-        }
-
-        std::array<int, 4> rootPc {};
-        std::array<Voicing, 4> vo;
-        for (int i = 0; i < numChords; ++i)
-        {
-            rootPc[(size_t) i] = (keyPc + steps[(size_t) i].rootSemis) % 12;
-            chordNames.add (noteName (rootPc[(size_t) i]) + chordType (steps[(size_t) i].q).suffix);
-        }
-
-        const Voicing* prev = nullptr;
-        for (int pass = 0; pass < 2; ++pass)
-        {
-            for (int i = 0; i < numChords; ++i)
-            {
-                vo[(size_t) i] = voice (rootPc[(size_t) i], chordType (steps[(size_t) i].q), prev, vibeY);
-                prev = &vo[(size_t) i];
-            }
-            prev = &vo[(size_t) (numChords - 1)];
-        }
-
-        progName = (isMinorVibe ? "Dark Trapsoul - " : "Neo-Soul Flow - ") + noteName (keyPc);
-
-        const double barDuration = (4.0 * bpb) / (double) numChords;
-        for (int i = 0; i < numChords; ++i)
-        {
-            bool allowSilence = (vibeY < 0.35f);
-            if (allowSilence && i == numChords - 1 && numChords > 2 && rng.nextBool()) continue;
-
-            const auto& v = vo[(size_t) i];
-            const double chordStart = (double) i * barDuration;
-            const double chordEnd = chordStart + barDuration;
-            const int totalVoices = 1 + v.nUp;
-
-            for (int j = 0; j < totalVoices; ++j)
-            {
-                const int note = (j == 0) ? v.bass : v.up[(size_t) j - 1];
-                int vel = 75 + (j == totalVoices - 1 ? 12 : 0) + (rng.nextInt (10) - 5);
-                if (j == 0) vel -= 8;
-                vel = juce::jlimit (1, 127, vel);
-
-                const float strum = (float) j * (1.5f + (1.0f - vibeY) * 3.5f);
-                out.add (chordStart, strum, note, vel, true);
-                out.add (chordEnd - 0.1, -2.0f, note, 0, false);
-            }
+            case 0: // Ethereal Void -> Numbness / Stasis
+                isMinor = true;
+                degrees = { 0, 10, 5, 8 };
+                break;
+            case 1: // Golden Hour -> Acceptance / Catharsis
+                isMinor = false;
+                degrees = { 0, 4, 9, 7 };
+                break;
+            case 2: // 2AM Confession -> Obsession / Tension
+                isMinor = true;
+                degrees = { 0, 1, 6, 8 };
+                break;
+            case 3: // Late Night Drive -> Euphoria / Peak
+                isMinor = false;
+                degrees = { 0, 5, 10, 2 };
+                break;
+            default:
+                degrees = { 0, 3, 5, 7 };
+                break;
         }
     }
+    else
+    {
+        if (isMinor) degrees = { 0, 3, 5, 7, 8, 10 };
+        else         degrees = { 0, 5, 9, 7, 2, 4 };
+    }
+
+    int numChords = 4;
+    struct Step { int root; Quality q; };
+    std::vector<Step> steps;
+
+    steps.push_back ({ degrees[0], isMinor ? Min9 : Maj9 });
+    for (int i = 1; i < numChords; ++i)
+    {
+        int deg = degrees[(size_t) rng.nextInt ((int) degrees.size())];
+        Quality q = isMinor ? (vibeY > 0.5f ? Min11 : Dom7sus) : (vibeY > 0.5f ? Maj13 : Dom9);
+        if (layer == 1 && subCorner == 2) q = Dom9; // Extra tension for obsession
+        if (layer == 1 && subCorner == 3) q = Min6; // 90s R&B subdominant drop for euphoria
+        steps.push_back ({ deg, q });
+    }
+
+    std::array<int, 4> rootPc {};
+    std::array<Voicing, 4> vo;
+    for (int i = 0; i < 4; ++i)
+    {
+        rootPc[(size_t) i] = (keyPc + steps[(size_t) i].root) % 12;
+        chordNames.add (noteName (rootPc[(size_t) i]) + chordType (steps[(size_t) i].q).suffix);
+    }
+
+    const Voicing* prev = nullptr;
+    for (int pass = 0; pass < 2; ++pass)
+    {
+        for (int i = 0; i < 4; ++i)
+        {
+            vo[(size_t) i] = voice (rootPc[(size_t) i], chordType (steps[(size_t) i].q), prev, vibeY);
+            prev = &vo[(size_t) i];
+        }
+        prev = &vo[3];
+    }
+
+    static const char* cornerNames[] = { "Ethereal Numbness", "Golden Acceptance", "2AM Obsession", "Night Euphoria" };
+    progName = (layer == 1 ? juce::String (cornerNames[subCorner]) : (isMinor ? "Dark Trapsoul" : "Neo-Soul Flow")) + " - " + noteName (keyPc);
+
+    const double barDuration = (4.0 * bpb) / 4.0;
+    for (int i = 0; i < 4; ++i)
+    {
+        const auto& v = vo[(size_t) i];
+        const double chordStart = (double) i * barDuration;
+        const double chordEnd = chordStart + barDuration;
+        const int totalVoices = 1 + v.nUp;
+
+        for (int j = 0; j < totalVoices; ++j)
+        {
+            const int note = (j == 0) ? v.bass : v.up[(size_t) j - 1];
+            int vel = 75 + (j == totalVoices - 1 ? 12 : 0) + (rng.nextInt (10) - 5);
+            if (j == 0) vel -= 8;
+            vel = juce::jlimit (1, 127, vel);
+
+            const float strum = (float) j * (1.5f + (1.0f - vibeY) * 3.5f);
+            out.add (chordStart, strum, note, vel, true);
+            out.add (chordEnd - 0.1, -2.0f, note, 0, false);
+        }
+    }
+}
 
 private:
     struct Voicing { int bass = 36; int nUp = 0; std::array<int, 6> up {}; };

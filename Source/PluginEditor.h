@@ -60,6 +60,13 @@ public:
         repaint();
     }
 
+    void setLayerState (int l, int corner)
+    {
+        layer = l;
+        activeCorner = corner;
+        repaint();
+    }
+
     float getXVal() const { return padX; }
     float getYVal() const { return padY; }
 
@@ -89,13 +96,37 @@ public:
         g.drawVerticalLine ((int) (r.getWidth() * 0.5f), 0.0f, r.getHeight());
 
         g.setFont (ui::font (11.0f));
-        g.setColour (ui::cold);
-        g.drawText ("2AM CONFESSION", r.reduced (14.0f), juce::Justification::bottomLeft);
-        g.setColour (ui::warm);
-        g.drawText ("LATE NIGHT DRIVE", r.reduced (14.0f), juce::Justification::bottomRight);
-        g.setColour (ui::text.withAlpha (0.7f));
-        g.drawText ("GOLDEN HOUR HEARTBREAK", r.reduced (14.0f), juce::Justification::topRight);
-        g.drawText ("ETHEREAL VOID", r.reduced (14.0f), juce::Justification::topLeft);
+
+        if (layer == 0)
+        {
+            // Base layer labels (4 corners)
+            g.setColour (activeCorner < 0 || activeCorner == 0 ? ui::cold : ui::dim.withAlpha(0.2f));
+            g.drawText ("ETHEREAL VOID [TL]", r.reduced (14.0f), juce::Justification::topLeft);
+
+            g.setColour (activeCorner < 0 || activeCorner == 1 ? ui::text : ui::dim.withAlpha(0.2f));
+            g.drawText ("GOLDEN HOUR [TR]", r.reduced (14.0f), juce::Justification::topRight);
+
+            g.setColour (activeCorner < 0 || activeCorner == 2 ? ui::cold : ui::dim.withAlpha(0.2f));
+            g.drawText ("2AM CONFESSION [BL]", r.reduced (14.0f), juce::Justification::bottomLeft);
+
+            g.setColour (activeCorner < 0 || activeCorner == 3 ? ui::warm : ui::dim.withAlpha(0.2f));
+            g.drawText ("LATE NIGHT DRIVE [BR]", r.reduced (14.0f), juce::Justification::bottomRight);
+        }
+        else
+        {
+            // Sub-layer zoomed view labels
+            static const char* subLabels[4][4] = {
+                { "NUMBNESS", "STASIS", "FLOAT", "VOID DEPTH" },
+                { "ACCEPTANCE", "CATHARSIS", "NOSTALGIA", "LIGHT" },
+                { "OBSESSION", "INSOMNIA", "TENSION", "ECHO" },
+                { "EUPHORIA", "PEAK DRIVE", "NEO-SOUL", "NEON" }
+            };
+
+            g.setColour (ui::warm);
+            g.drawText (juce::String ("ZOOMED SUB-LAYER: ") + juce::String (activeCorner >= 0 ? subLabels[activeCorner][0] : "SUB"), r.reduced (14.0f), juce::Justification::topLeft);
+            g.setColour (ui::dim);
+            g.drawText ("PULL OPPOSITE TO ZOOM OUT", r.reduced (14.0f), juce::Justification::bottomRight);
+        }
 
         const float px = padX * r.getWidth();
         const float py = (1.0f - padY) * r.getHeight();
@@ -106,7 +137,7 @@ public:
         g.setGradientFill (halo);
         g.fillEllipse (dotArea.expanded (16.0f));
 
-        g.setColour (ui::text);
+        g.setColour (juce::Colours::white);
         g.fillEllipse (dotArea);
         g.setColour (currentAccent);
         g.drawEllipse (dotArea, 2.5f);
@@ -123,6 +154,8 @@ private:
     }
 
     float padX = 0.5f, padY = 0.5f;
+    int layer = 0;
+    int activeCorner = -1;
 };
 
 class ChordStrip : public juce::Component
@@ -229,6 +262,7 @@ private:
     void exportAndDragAllMidi();
     void exportAndDragSingleMidi (int index);
     void previewChordClicked (int index);
+    void handlePadRelease (float x, float y);
 
     VibeSparkAudioProcessor& proc;
     VibeLookAndFeel laf;
