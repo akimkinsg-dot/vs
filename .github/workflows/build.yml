@@ -12,18 +12,34 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure
-        run: >
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_OSX_ARCHITECTURES=arm64
-          -DVIBESPARK_LIVE_MODE=ON
-          -DVIBESPARK_COPY_AFTER_BUILD=OFF
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DVIBESPARK_LIVE_MODE=ON \
+            -DVIBESPARK_COPY_AFTER_BUILD=OFF
 
       - name: Build
-        run: cmake --build build --config Release -j 4
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --build build --config Release -j 4 --verbose
+          echo "== VST3 bundles =="
+          find build -type d -name "*.vst3" -print
 
       - name: Ad-hoc sign and zip
+        shell: bash
         run: |
-          VST3=build/VibeSpark_artefacts/Release/VST3/VibeSpark.vst3
+          set -euxo pipefail
+          VST3="$(find build -type d -name "*.vst3" | head -n 1)"
+          if [[ -z "$VST3" ]]; then
+            echo "No VST3 bundle found under build/"
+            find build -maxdepth 8 -print
+            exit 1
+          fi
+
+          echo "Signing: $VST3"
           codesign --force --deep -s - "$VST3"
           ditto -c -k --keepParent "$VST3" VibeSpark-VST3-macOS-arm64.zip
 
