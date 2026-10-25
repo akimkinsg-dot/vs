@@ -30,9 +30,10 @@ struct Progression
         ev[(size_t) n++] = { beat, ms, (juce::uint8) note, (juce::uint8) vel, on };
     }
 
-    juce::MidiSequence toMidiSequence (double bpb = 4.0) const
+    juce::MidiMessageSequence toMidiMessageSequence (double bpb = 4.0) const
     {
-        juce::MidiSequence seq;
+        juce::ignoreUnused (bpb);
+        juce::MidiMessageSequence seq;
         const double ppqScale = 960.0; // Standard ticks per quarter note
         for (int i = 0; i < n; ++i)
         {
@@ -124,6 +125,7 @@ public:
     void generate (float vibe, float space, int keyPc, double bpm, double beatsPerBar,
                    Progression& out, juce::StringArray& chordNames, juce::String& progName)
     {
+        juce::ignoreUnused (bpm);
         vibe  = juce::jlimit (0.0f, 1.0f, vibe);
         space = juce::jlimit (0.0f, 1.0f, space);
         keyPc = ((keyPc % 12) + 12) % 12;

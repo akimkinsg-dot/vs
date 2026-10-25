@@ -58,7 +58,7 @@ void VibeSparkAudioProcessorEditor::exportAndDragMidi()
 
     juce::MidiFile file;
     file.setTicksPerQuarterNote (960);
-    file.addTrack (prog.toMidiSequence (proc.hostBeatsPerBar.load()));
+    file.addTrack (prog.toMidiMessageSequence (proc.hostBeatsPerBar.load()));
 
     juce::File tempDir = juce::File::getSpecialLocation (juce::File::tempDirectory);
     juce::File tempMidi = tempDir.getChildFile ("VibeSpark_Chords.mid");
